@@ -1259,6 +1259,7 @@ function invTotals(inv){const items=Array.isArray(inv.items)?inv.items:[];const 
 // (Collected, Outstanding, Revenue) must use these instead of a raw status==='Paid' filter, or a
 // Partial invoice's real collected/owed amounts silently vanish from every summary.
 function invCollected(inv){if(inv.status==='Paid')return invTotals(inv).total;if(inv.status==='Partial')return inv.paid||0;return 0;}
+function addInvByMode(map,inv,fallback){const sp=inv.splitPayments;if(sp&&sp.length&&inv.status==='Paid'){sp.forEach(r=>{const m=r.mode==='Wallet (advance)'?'Wallet':(r.mode||fallback);map[m]=(map[m]||0)+(+r.amount||0);});}else{const m=inv.mode||fallback;map[m]=(map[m]||0)+invCollected(inv);}}
 function invDue(inv){if(inv.status==='Pending')return invTotals(inv).total;if(inv.status==='Partial')return inv.pending!=null?inv.pending:Math.max(0,invTotals(inv).total-(inv.paid||0));return 0;}
 function discAmtFromInputs(sub,type,val){val=+val||0;if(val<=0)return 0;const amt=type==="flat"?val:Math.round(sub*val)/100;return Math.max(0,Math.min(amt,sub));}
 function discField(prefix,calcFn){const c=calcFn?calcFn+"()":"";return `<div class="field"><label>Discount <span class="muted" style="font-weight:400">(optional)</span></label><div style="display:flex;gap:6px"><select id="${prefix}_disc_type" style="width:64px;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="${c}"><option value="pct">%</option><option value="flat">₹</option></select><input id="${prefix}_disc_val" type="number" value="0" min="0" placeholder="0" style="width:80px;padding:8px;border:1px solid var(--line);border-radius:8px" oninput="${c}"><input id="${prefix}_disc_reason" placeholder="Reason (e.g. senior citizen)" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px"></div></div>`;}
@@ -2826,7 +2827,7 @@ views.billing=()=>{const inv=DB.invoices.filter(inBranch).slice().sort((a,b)=>b.
  const paid=inv.reduce((s,i)=>s+invCollected(i),0);
  const pend=inv.reduce((s,i)=>s+invDue(i),0);
  const todayInv=inv.filter(i=>(i.status==='Paid'||i.status==='Partial')&&(i.paidAt||i.date)===todayISO);
- const byMode={};todayInv.forEach(i=>{const m=i.mode||'—';byMode[m]=(byMode[m]||0)+invCollected(i);});
+ const byMode={};todayInv.forEach(i=>addInvByMode(byMode,i,'—'));
  const collToday=todayInv.reduce((s,i)=>s+invCollected(i),0);
  const expToday=DB.expenses.filter(inBranch).filter(e=>e.date===todayISO).reduce((s,e)=>s+e.amount,0);
  const q=_invSearch.toLowerCase().trim();
@@ -2882,7 +2883,7 @@ views.billing=()=>{const inv=DB.invoices.filter(inBranch).slice().sort((a,b)=>b.
 function downloadDayCloseReport(){
  const inv=(DB.invoices||[]).filter(inBranch);
  const todayInv=inv.filter(i=>(i.status==='Paid'||i.status==='Partial')&&(i.paidAt||i.date)===todayISO);
- const byMode={};todayInv.forEach(i=>{const m=i.mode||'—';byMode[m]=(byMode[m]||0)+invCollected(i);});
+ const byMode={};todayInv.forEach(i=>addInvByMode(byMode,i,'—'));
  const collToday=todayInv.reduce((s,i)=>s+invCollected(i),0);
  const todayExp=(DB.expenses||[]).filter(inBranch).filter(e=>e.date===todayISO);
  const expToday=todayExp.reduce((s,e)=>s+e.amount,0);
@@ -3638,7 +3639,7 @@ views.reports=()=>{
   const expTotal=ex.reduce((s,e)=>s+e.amount,0);
   const profit=rev-expTotal;
   // Income by mode
-  const byMode={};paid.forEach(i=>{const m=i.mode||'Other';byMode[m]=(byMode[m]||0)+invCollected(i);});
+  const byMode={};paid.forEach(i=>addInvByMode(byMode,i,'Other'));
   // Expenses by category
   const byCat={};ex.forEach(e=>{byCat[e.cat]=(byCat[e.cat]||0)+e.amount;});
   // Week-wise revenue for selected month
