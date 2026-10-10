@@ -920,27 +920,6 @@ async function sbSaveData(){
  return true;
 }
 function save(){sbSaveData();return true;}
-// Genuine blank start for client handoff — every patient, appointment, assessment, treatment
-// plan, package, invoice, expense, and reminder is wiped, not just swapped for different
-// sample data. Only a single empty branch record is kept (code elsewhere assumes at least
-// one branch exists) — clinic name, address, staff, everything else starts truly empty.
-function factoryReset(){
- if(CURROLE!=='owner'){alert("Only the owner can do this.");return;}
- if(!confirm("⚠️ This permanently deletes EVERYTHING — every patient, appointment, assessment, treatment plan, package, invoice, expense, and reminder — for every login. There is no undo. Continue?"))return;
- const typed=prompt('This cannot be undone. Type DELETE (all caps) to confirm wiping all clinic data:');
- if(typed!=='DELETE'){alert("Cancelled — nothing was changed.");return;}
- DB={
-  exercisePresets:[],customModalities:[],billingServices:[],exerciseLinks:[],
-  branches:[{id:"b1",name:"",address:"",phone:""}],
-  staff:[],attendance:[],patients:[],appointments:[],consultations:[],assessments:[],plans:[],
-  pkgTemplates:[],msgTemplates:[],patientPkgs:[],invoices:[],expenses:[],reminders:[],
-  active:[],auditLog:[],
-  settings:{wa:true,sms:true,leadHrs:24,payReminder:true,clinic:"",gstin:"",msgCredits:0}
- };
- ["pm_last_full_dl","pm_last_full_size","pm_last_dl","pm_gdrive_last","pm_gdrive_folder"].forEach(k=>localStorage.removeItem(k));
- save();fillBranches();render();
- alert("✅ Clinic data wiped. Set the clinic name in Settings, then add branches, staff, and patients to get started.");
-}
 async function sbLogout(){if(_rtChannel){sb.removeChannel(_rtChannel);_rtChannel=null;}if(sb)await sb.auth.signOut();DB=undefined;CURNAME=null;location.reload();}
 function logout(){sbLogout();}
 
@@ -4166,10 +4145,7 @@ views.settings=()=>`<div class="panel" style="max-width:640px"><div class="panel
  <div class="panel" style="max-width:640px"><div class="panel-h"><h3>About this build</h3></div><div class="panel-b muted" style="font-size:13px">
   PhysioMind — Clinic OS. Covers patients, appointments, consultations & prescriptions, treatments, packages, GST billing, expenses, reports, staff payroll, multi-branch, and WhatsApp/SMS reminders, backed by a secure cloud database with user logins and role-based access.
  </div></div>
- ${CURROLE==='owner'?`<div class="panel" style="max-width:640px;border-color:#fecaca"><div class="panel-h"><h3 style="color:var(--danger)">⚠️ Danger zone</h3></div><div class="panel-b">
-  <div class="muted" style="font-size:12.5px;margin-bottom:10px">Wipes every patient, appointment, assessment, treatment plan, package, invoice, expense and reminder — for every login, with no undo. Meant for right after setting up a brand-new clinic, to clear any starter/demo data before adding real patients — not for routine use.</div>
-  <button class="btn sm danger sec" onclick="factoryReset()">🗑 Wipe all data &amp; start fresh</button>
- </div></div>`:''}`;
+`;
 
 /* ══════════════════════════════════════════════════════
    ASSESSMENT MODULE
