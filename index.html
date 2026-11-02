@@ -87,6 +87,7 @@ tr.clk:hover{background:#f7fafc;cursor:pointer}
 .field label{display:block;font-weight:600;font-size:12.5px;margin-bottom:5px;color:#3a4456}
 .field input,.field select,.field textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;outline:none}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.field input[readonly]{background:var(--bg2);color:var(--muted);cursor:default}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px}
 .overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;padding:40px 20px;z-index:1100;overflow:auto}
@@ -1237,6 +1238,10 @@ function ensurePatientSerials(){
 // anywhere — kept only so the Patients search still finds someone by the ID printed on older documents.
 function legacyPatientCode(p){const base=(p.dob||"").split("-").reverse().join("");if(!base)return"";const same=DB.patients.filter(x=>x.dob===p.dob);return same.length>1?base+"-"+(same.findIndex(x=>x.id===p.id)+1):base;}
 function ageFromDob(dob){if(!dob)return"";const b=new Date(dob),n=new Date(todayISO);let a=n.getFullYear()-b.getFullYear();if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))a--;return a;}
+// An Age box that sits next to a date-of-birth box: worked out from the DOB (and locked) when there is one, typed in by hand when there isn't.
+function syncAge(dobId,ageId){const d=document.getElementById(dobId),a=document.getElementById(ageId);if(!d||!a)return;
+  if(d.value&&d.value<=todayISO){a.value=ageFromDob(d.value);a.readOnly=true;a.title="Worked out from the date of birth";}
+  else{a.readOnly=false;a.title="";}}
 const bName=id=>(DB.branches.find(b=>b.id===id)||{name:"—"}).name;
 const initials=n=>n.split(" ").filter(w=>!/^(dr\.?|mr\.?|ms\.?)$/i.test(w)).map(w=>w[0]).slice(0,2).join("").toUpperCase();
 const inr=n=>"₹"+(+n).toLocaleString("en-IN");
@@ -1850,9 +1855,11 @@ function patientForm(id){const p=id?pById(id):{name:"",dob:"",gender:"M",phone:"
  <div class="modal-b">
   ${id?`<div class="muted" style="font-size:12.5px;margin-bottom:10px">Patient ID: <b style="color:var(--brand)">${patientCode(p)}</b></div>`:''}
   <div class="field"><label>Full name</label><input id="f_name" value="${p.name}"></div>
-  <div class="grid3"><div class="field"><label>Date of birth</label><input id="f_dob" type="date" value="${p.dob||''}"></div>
-   <div class="field"><label>Gender</label><select id="f_gender"><option ${p.gender==='M'?'selected':''}>M</option><option ${p.gender==='F'?'selected':''}>F</option></select></div>
-   <div class="field"><label>Phone</label><input id="f_phone" value="${p.phone}"></div></div>
+  <div class="muted" style="font-size:11.5px;margin:-6px 0 7px">Enter the date of birth <b>or</b> the age — a date of birth fills in the age for you.</div>
+  <div class="grid3"><div class="field"><label>Date of birth</label><input id="f_dob" type="date" value="${p.dob||''}" oninput="syncAge('f_dob','f_age')" onchange="syncAge('f_dob','f_age')"></div>
+   <div class="field"><label>Age <span class="muted">(years)</span></label><input id="f_age" type="number" min="0" max="120" step="1" inputmode="numeric" placeholder="years" value="${p.age===0||p.age?p.age:''}"></div>
+   <div class="field"><label>Gender</label><select id="f_gender"><option ${p.gender==='M'?'selected':''}>M</option><option ${p.gender==='F'?'selected':''}>F</option></select></div></div>
+  <div class="field"><label>Phone</label><input id="f_phone" value="${p.phone}"></div>
   <div class="field"><label>Condition / Diagnosis</label><input id="f_cond" value="${p.condition}"></div>
   <div class="grid2"><div class="field"><label>Email</label><input id="f_email" value="${p.email||''}"></div>
    <div class="field"><label>Occupation</label><input id="f_occ" value="${p.occ||''}"></div></div>
@@ -1863,10 +1870,12 @@ function patientForm(id){const p=id?pById(id):{name:"",dob:"",gender:"M",phone:"
   <div class="grid2"><div class="field"><label>Therapist</label><select id="f_ther">${DB.staff.map(s=>`<option ${p.therapist===s.name?'selected':''}>${s.name}</option>`).join("")}</select></div>
    <div class="field"><label>Branch</label><select id="f_branch">${DB.branches.map(b=>`<option value="${b.id}" ${p.branch===b.id?'selected':''}>${b.name}</option>`).join("")}</select></div></div>
  </div>
- <div class="modal-f"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="savePatient('${id||''}')">Save</button></div>`);}
-function savePatient(id){const v=k=>{const el=document.getElementById(k);return el?el.value:"";};const dob=v("f_dob");const obj={name:v("f_name"),dob,age:ageFromDob(dob),gender:v("f_gender"),phone:v("f_phone"),condition:v("f_cond"),email:v("f_email"),occ:v("f_occ"),addr:v("f_addr"),emName:v("f_emname"),emPhone:v("f_emphone"),refDr:v("f_refdr"),therapist:v("f_ther"),branch:v("f_branch")};
+ <div class="modal-f"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="savePatient('${id||''}')">Save</button></div>`);syncAge("f_dob","f_age");}
+function savePatient(id){const v=k=>{const el=document.getElementById(k);return el?el.value:"";};const dob=v("f_dob"),ageIn=v("f_age").trim(),age=dob?ageFromDob(dob):(ageIn===""?"":+ageIn);const obj={name:v("f_name"),dob,age,gender:v("f_gender"),phone:v("f_phone"),condition:v("f_cond"),email:v("f_email"),occ:v("f_occ"),addr:v("f_addr"),emName:v("f_emname"),emPhone:v("f_emphone"),refDr:v("f_refdr"),therapist:v("f_ther"),branch:v("f_branch")};
  if(!obj.name){alert("Name required");return;}
- if(!dob){alert("Date of birth required");return;}
+ if(!dob&&ageIn===""){alert("Enter the date of birth or the age");return;}
+ if(dob&&dob>todayISO){alert("Date of birth can't be in the future");return;}
+ if(!dob&&!(/^\d{1,3}$/.test(ageIn)&&age<=120)){alert("Enter the age in whole years (0–120)");return;}
  if(id){Object.assign(pById(id),obj);logAudit("Patient","Edited profile",obj.name||"");}else{var _np={id:uid("p"),serial:nextPatientSerial(),since:todayISO,sinceTime:nowTime(),wallet:0,docs:[],...obj};DB.patients.push(_np);logAudit("Patient Added","New patient · ID "+patientCode(_np),_np.name||"");}save();closeModal();render();}
 
 /* APPOINTMENTS */
@@ -1997,7 +2006,7 @@ function apptForm(date,time,ther){const pts=DB.patients.filter(p=>!MYTHER||p.the
      <input id="qap_name" placeholder="Patient name*" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
      <input id="qap_phone" placeholder="Phone (optional)" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
     </div>
-    <div class="muted" style="font-size:11.5px;margin:6px 0">You can fill in the rest of their profile (DOB, condition, etc.) later, before their first visit.</div>
+    <div class="muted" style="font-size:11.5px;margin:6px 0">You can fill in the rest of their profile (age or DOB, condition, etc.) later, before their first visit.</div>
     <button type="button" class="btn sm" onclick="quickAddPatient()">Save & select</button>
    </div>
   </div>
@@ -4451,6 +4460,11 @@ function aFunc(i,v){const a=window._aForm;if(!a)return;if(v&&!a.func.includes(i)
 function aSetPain(i){const a=window._aForm;if(!a)return;a.painScore=i;aUpdatePainFor(a);}
 
 // ── assessForm: open the full assessment modal (new or edit) ──
+// Age box for the assessment forms: shows the patient's age. Locked when the patient has a date of birth to work it out from;
+// otherwise it can be typed in here and saveAssess() puts it on the patient's profile.
+function assessAgeHTML(pid){const p=DB.patients.find(x=>x.id===pid);const fromDob=!!(p&&p.dob);const val=p?(fromDob?ageFromDob(p.dob):(p.age===0||p.age?p.age:"")):"";
+  return `<div class="field"><label>Age <span class="muted">${fromDob?"(from date of birth)":"(years)"}</span></label><input id="ca_age" type="number" min="0" max="120" step="1" inputmode="numeric" placeholder="years" value="${val}"${fromDob?" readonly":""}></div>`;}
+function refreshAssessAge(){const w=document.getElementById("ca_age_wrap"),s=document.getElementById("ca_pid");if(w&&s)w.innerHTML=assessAgeHTML(s.value);}
 function assessForm(_,pid){
   const freshA={id:uid("ca"),pid:pid||"",date:todayISO,therapist:MYTHER||(DB.staff[0]||{name:""}).name,
     mode:"template",complaint:"",onset:"",painsite:"",pain:null,aggr:"",reliev:"",history:"",
@@ -4460,8 +4474,9 @@ function assessForm(_,pid){
   window._aForm=freshA;
   openModal(`<div class="modal-h"><h3>New Assessment</h3><button class="x" onclick="closeModal()">×</button></div>
  <div class="modal-b">
-  <div class="field"><label>Patient</label><select id="ca_pid" onchange="window._aForm.pid=this.value">${DB.patients.map(p=>`<option value="${p.id}" ${pid===p.id?'selected':''}>${p.name}</option>`).join("")}</select></div>
-  <div class="field"><label>Therapist</label><select id="ca_ther" onchange="window._aForm.therapist=this.value">${DB.staff.map(s=>`<option ${(MYTHER||"")===s.name?'selected':''}>${s.name}</option>`).join("")}</select></div>
+  <div class="field"><label>Patient</label><select id="ca_pid" onchange="window._aForm.pid=this.value;refreshAssessAge()">${DB.patients.map(p=>`<option value="${p.id}" ${pid===p.id?'selected':''}>${p.name}</option>`).join("")}</select></div>
+  <div class="grid2"><div id="ca_age_wrap">${assessAgeHTML(pid||(DB.patients[0]||{}).id)}</div>
+   <div class="field"><label>Therapist</label><select id="ca_ther" onchange="window._aForm.therapist=this.value">${DB.staff.map(s=>`<option ${(MYTHER||"")===s.name?'selected':''}>${s.name}</option>`).join("")}</select></div></div>
   <label style="font-weight:600;font-size:12.5px;color:#3a4456">Assessment method</label>
   <div class="tabs" id="catabs" style="margin:6px 0 14px">
     <button class="active" data-m="template" onclick="caMode('template')">📝 Digital template</button>
@@ -4547,6 +4562,13 @@ function saveAssess(){
   const a=window._aForm;if(!a)return;
   const gv=id=>{const el=document.getElementById(id);return el?el.value:"";}
   a.pid=gv("ca_pid")||a.pid;
+  // An age typed into this form goes onto the patient's profile (the box is locked when the patient has a date of birth).
+  const _ageEl=document.getElementById("ca_age"),_ageP=DB.patients.find(x=>x.id===a.pid);
+  if(_ageEl&&!_ageEl.readOnly&&_ageP&&_ageEl.value.trim()!==""){
+    const _n=_ageEl.value.trim();
+    if(!(/^\d{1,3}$/.test(_n)&&+_n<=120)){alert("Enter the age in whole years (0–120)");return;}
+    if(+_n!==_ageP.age){_ageP.age=+_n;logAudit("Patient","Age set to "+_n+" (from assessment form)",_ageP.name);}
+  }
   a.therapist=gv("ca_ther")||a.therapist;
   a.rx=gv("ca_rx").split("\n").filter(x=>x.trim());
   a.modalities=gv("ca_mods").split("\n").filter(x=>x.trim());
@@ -5200,8 +5222,9 @@ function assessEdit(id){
   const pid=existing.pid;
   openModal(`<div class="modal-h"><h3>Edit Assessment</h3><button class="x" onclick="closeModal()">×</button></div>
  <div class="modal-b">
-  <div class="field"><label>Patient</label><select id="ca_pid" onchange="window._aForm.pid=this.value">${DB.patients.map(p=>`<option value="${p.id}" ${pid===p.id?'selected':''}>${p.name}</option>`).join("")}</select></div>
-  <div class="field"><label>Therapist</label><select id="ca_ther" onchange="window._aForm.therapist=this.value">${DB.staff.map(s=>`<option ${existing.therapist===s.name?'selected':''}>${s.name}</option>`).join("")}</select></div>
+  <div class="field"><label>Patient</label><select id="ca_pid" onchange="window._aForm.pid=this.value;refreshAssessAge()">${DB.patients.map(p=>`<option value="${p.id}" ${pid===p.id?'selected':''}>${p.name}</option>`).join("")}</select></div>
+  <div class="grid2"><div id="ca_age_wrap">${assessAgeHTML(pid)}</div>
+   <div class="field"><label>Therapist</label><select id="ca_ther" onchange="window._aForm.therapist=this.value">${DB.staff.map(s=>`<option ${existing.therapist===s.name?'selected':''}>${s.name}</option>`).join("")}</select></div></div>
   <label style="font-weight:600;font-size:12.5px;color:#3a4456">Assessment method</label>
   <div class="tabs" id="catabs" style="margin:6px 0 14px">
     <button class="${existing.mode==='template'?'active':''}" data-m="template" onclick="caMode('template')">📝 Digital template</button>
@@ -5328,7 +5351,7 @@ views.help=function(){
   sec("➕ Adding &amp; managing a patient",
    `<ol style="margin:10px 0 0 22px">
     <li>Go to <b>Patients</b> → <b>+ New Patient</b></li>
-    <li>Fill in name, phone, date of birth, gender, condition, and assign a therapist</li>
+    <li>Fill in name, phone, date of birth <i>or</i> age (if you enter a date of birth, the age is worked out for you), gender, condition, and assign a therapist</li>
     <li>Optional fields (email, address, emergency contact, referring doctor, occupation) can be added now or later from the patient's profile</li>
     <li>Save — the patient gets the next <b>Patient ID</b> automatically (0001, 0002, 0003 …) and appears at the top of the list, newest first. The ID never changes, even if the date of birth is edited later</li>
    </ol>
