@@ -1214,7 +1214,28 @@ function promptNewExercise(regId,exId,taId){
 }
 
 const pById=id=>DB.patients.find(p=>p.id===id)||{name:"—"};
-function patientCode(p){const base=(p.dob||"").split("-").reverse().join("");if(!base)return(p.id||"").toUpperCase();const same=DB.patients.filter(x=>x.dob===p.dob);if(same.length>1){const idx=same.findIndex(x=>x.id===p.id);return base+"-"+(idx+1);}return base;}
+/* ── PATIENT ID — a permanent serial number: 0001, 0002, 0003 … ───────────────────────────────
+   Given once, when the patient is registered, and stored on the patient (p.serial) — so it never
+   changes if a date of birth is corrected. Next number = highest used + 1 (same idea as nextInvNo);
+   patients are only ever made Inactive, never deleted, so a number is never handed out twice.
+   Patients registered before this existed (or restored from an older backup) get numbered by
+   ensurePatientSerials() in the order they registered: the oldest becomes 0001. */
+const PATIENT_ID_DIGITS=4;
+function patientCode(p){return p&&p.serial?String(p.serial).padStart(PATIENT_ID_DIGITS,"0"):"—";}
+function nextPatientSerial(){ensurePatientSerials();return DB.patients.reduce((m,p)=>Math.max(m,+(p&&p.serial)||0),0)+1;}
+function ensurePatientSerials(){
+  const list=(DB&&DB.patients)||[];
+  const todo=list.filter(p=>p&&!p.serial);
+  if(!todo.length)return; // normal case: everyone already has a number
+  let n=list.reduce((m,p)=>Math.max(m,+(p&&p.serial)||0),0);
+  const first=n+1;
+  const when=p=>(p.since||"")+" "+(p.sinceTime||""); // "YYYY-MM-DD HH:MM" — plain-text order is time order; undated sorts first
+  todo.sort((a,b)=>when(a)<when(b)?-1:when(a)>when(b)?1:0).forEach(p=>{p.serial=++n;}); // todo is a copy: DB.patients keeps its order
+  logAudit("Patient ID","Serial IDs "+patientCode({serial:first})+(n>first?" to "+patientCode({serial:n}):"")+" assigned to "+todo.length+" patient"+(todo.length>1?"s":"")+" who had none yet","");
+}
+// The old DOB-based ID (DDMMYYYY, "-2" for a second patient with the same DOB). It is no longer shown
+// anywhere — kept only so the Patients search still finds someone by the ID printed on older documents.
+function legacyPatientCode(p){const base=(p.dob||"").split("-").reverse().join("");if(!base)return"";const same=DB.patients.filter(x=>x.dob===p.dob);return same.length>1?base+"-"+(same.findIndex(x=>x.id===p.id)+1):base;}
 function ageFromDob(dob){if(!dob)return"";const b=new Date(dob),n=new Date(todayISO);let a=n.getFullYear()-b.getFullYear();if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))a--;return a;}
 const bName=id=>(DB.branches.find(b=>b.id===id)||{name:"—"}).name;
 const initials=n=>n.split(" ").filter(w=>!/^(dr\.?|mr\.?|ms\.?)$/i.test(w)).map(w=>w[0]).slice(0,2).join("").toUpperCase();
@@ -1296,6 +1317,7 @@ function go(v){current=v;document.querySelectorAll("#nav button").forEach(b=>b.c
 document.getElementById("nav").addEventListener("click",e=>{const b=e.target.closest("button");if(b){go(b.dataset.v);toggleNav(false);}});
 function toggleNav(force){const sb=document.querySelector(".sidebar"),bd=document.getElementById("backdrop"),bn=document.getElementById("bottomNav");const open=force!==undefined?force:!sb.classList.contains("open");sb.classList.toggle("open",open);bd.classList.toggle("show",open);if(bn)bn.style.display=open?"none":"";}
 function render(){
+  ensurePatientSerials(); // numbers anyone without a Patient ID yet (first run after this update, an older backup restored, a stale tab); no-op otherwise
   // Remember what was focused before the re-render (search boxes trigger render on every keystroke,
   // so without this the input gets destroyed and rebuilt, kicking the mobile keyboard off after 1 letter).
   const active=document.activeElement;
@@ -1446,7 +1468,7 @@ views.patients=()=>{
     ${months.map(m=>`<option value="${m}" ${_patMonth===m?"selected":""}>${MNAMES[+m.slice(5,7)-1]} ${m.slice(0,4)}</option>`).join("")}
    </select>
    <div style="display:flex;gap:8px;margin-left:auto">
-    <div class="search">🔍<input id="psearch" placeholder="Search name, phone, DOB..." oninput="filterPatients(this.value)"></div>
+    <div class="search">🔍<input id="psearch" placeholder="Name, phone, ID, DOB..." oninput="filterPatients(this.value)"></div>
     <button class="btn" onclick="patientForm()">+ New Patient</button>
    </div>
   </div>
@@ -1826,9 +1848,9 @@ function uploadDoc(id){
 function patientForm(id){const p=id?pById(id):{name:"",dob:"",gender:"M",phone:"",condition:"",therapist:MYTHER||(DB.staff[0]||{}).name||"",branch:DB.branches[0].id,wallet:0,docs:[]};
  openModal(`<div class="modal-h"><h3>${id?"Edit":"New"} Patient</h3><button class="x" onclick="closeModal()">×</button></div>
  <div class="modal-b">
-  ${id?`<div class="muted" style="font-size:12.5px;margin-bottom:10px">Patient ID: <b style="color:var(--brand)">${patientCode(p)}</b> (date of birth)</div>`:''}
+  ${id?`<div class="muted" style="font-size:12.5px;margin-bottom:10px">Patient ID: <b style="color:var(--brand)">${patientCode(p)}</b></div>`:''}
   <div class="field"><label>Full name</label><input id="f_name" value="${p.name}"></div>
-  <div class="grid3"><div class="field"><label>Date of birth <span class="muted">(= patient ID)</span></label><input id="f_dob" type="date" value="${p.dob||''}"></div>
+  <div class="grid3"><div class="field"><label>Date of birth</label><input id="f_dob" type="date" value="${p.dob||''}"></div>
    <div class="field"><label>Gender</label><select id="f_gender"><option ${p.gender==='M'?'selected':''}>M</option><option ${p.gender==='F'?'selected':''}>F</option></select></div>
    <div class="field"><label>Phone</label><input id="f_phone" value="${p.phone}"></div></div>
   <div class="field"><label>Condition / Diagnosis</label><input id="f_cond" value="${p.condition}"></div>
@@ -1844,8 +1866,8 @@ function patientForm(id){const p=id?pById(id):{name:"",dob:"",gender:"M",phone:"
  <div class="modal-f"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="savePatient('${id||''}')">Save</button></div>`);}
 function savePatient(id){const v=k=>{const el=document.getElementById(k);return el?el.value:"";};const dob=v("f_dob");const obj={name:v("f_name"),dob,age:ageFromDob(dob),gender:v("f_gender"),phone:v("f_phone"),condition:v("f_cond"),email:v("f_email"),occ:v("f_occ"),addr:v("f_addr"),emName:v("f_emname"),emPhone:v("f_emphone"),refDr:v("f_refdr"),therapist:v("f_ther"),branch:v("f_branch")};
  if(!obj.name){alert("Name required");return;}
- if(!dob){alert("Date of birth required — it is the patient's ID");return;}
- if(id){Object.assign(pById(id),obj);logAudit("Patient","Edited profile",obj.name||"");}else{var _np={id:uid("p"),since:todayISO,sinceTime:nowTime(),wallet:0,docs:[],...obj};DB.patients.push(_np);logAudit("Patient Added","New patient",_np.name||"");}save();closeModal();render();}
+ if(!dob){alert("Date of birth required");return;}
+ if(id){Object.assign(pById(id),obj);logAudit("Patient","Edited profile",obj.name||"");}else{var _np={id:uid("p"),serial:nextPatientSerial(),since:todayISO,sinceTime:nowTime(),wallet:0,docs:[],...obj};DB.patients.push(_np);logAudit("Patient Added","New patient · ID "+patientCode(_np),_np.name||"");}save();closeModal();render();}
 
 /* APPOINTMENTS */
 const _therPalette=["#7c5cc4","#0d9488","#7c3aed","#d97706","#dc2626","#059669","#db2777","#4f46e5","#0891b2","#65a30d"];
@@ -2012,11 +2034,11 @@ function quickAddPatient(){
  if(!name){alert("Enter the patient's name.");return;}
  const phone=(document.getElementById("qap_phone").value||"").trim();
  const therEl=document.getElementById("a_ther");
- const _np={id:uid("p"),since:todayISO,sinceTime:nowTime(),wallet:0,docs:[],name,phone,dob:"",age:"",gender:"",condition:"",
+ const _np={id:uid("p"),serial:nextPatientSerial(),since:todayISO,sinceTime:nowTime(),wallet:0,docs:[],name,phone,dob:"",age:"",gender:"",condition:"",
   therapist:(therEl&&therEl.value)||(DB.staff[0]||{}).name||"",
   branch:curBranch()==="all"?DB.branches[0].id:curBranch()};
  DB.patients.push(_np);
- logAudit("Patient Added","Quick-added while booking (name only, profile pending)",_np.name);
+ logAudit("Patient Added","Quick-added while booking (name only, profile pending) · ID "+patientCode(_np),_np.name);
  save();
  const list=document.getElementById("a_pid_list");
  const row=document.createElement("button");
@@ -2917,9 +2939,10 @@ function filterPatients(q){
   const base=_ptab==="active"?all.filter(p=>(p.status||"Active")==="Active"):_ptab==="inactive"?all.filter(p=>p.status==="Inactive"):all;
   const monthFiltered=_patMonth?base.filter(p=>(p.since||"").startsWith(_patMonth)):base;
   _patFiltered=monthFiltered.filter(p=>{
-    const hay=(p.name+" "+(p.dob||"")+" "+patientCode(p)+" "+p.condition).toLowerCase();
+    const code=patientCode(p),old=legacyPatientCode(p); // old = the DOB-style ID printed on older documents
+    const hay=(p.name+" "+(p.dob||"")+" "+code+" "+old+" "+p.condition).toLowerCase();
     const phone=(p.phone||"").replace(/\D/g,"");
-    return hay.includes(raw)||(dig.length>=2&&(phone.includes(dig)||patientCode(p).includes(dig)||(p.dob||"").replace(/\D/g,"").includes(dig)));
+    return hay.includes(raw)||(dig.length>=2&&(phone.includes(dig)||code.includes(dig)||old.includes(dig)||(p.dob||"").replace(/\D/g,"").includes(dig)));
   }).reverse().sort((a,b)=>(b.since||"").localeCompare(a.since||"")||(b.sinceTime||"").localeCompare(a.sinceTime||""));
   _patPage=0;setPatPage(0);
 }
@@ -5307,7 +5330,7 @@ views.help=function(){
     <li>Go to <b>Patients</b> → <b>+ New Patient</b></li>
     <li>Fill in name, phone, date of birth, gender, condition, and assign a therapist</li>
     <li>Optional fields (email, address, emergency contact, referring doctor, occupation) can be added now or later from the patient's profile</li>
-    <li>Save — the patient appears at the top of the list, newest first</li>
+    <li>Save — the patient gets the next <b>Patient ID</b> automatically (0001, 0002, 0003 …) and appears at the top of the list, newest first. The ID never changes, even if the date of birth is edited later</li>
    </ol>
    <p style="margin-top:8px">Opening any patient shows tabs for <b>Assessment</b>, <b>Treatment given</b>, and <b>Billing</b> — which tabs you see depends on your login (see "What your login can see" below).</p>
    <p style="margin-top:6px">Use <b>Mark Inactive</b> from a patient's row to archive someone no longer being treated, without deleting their history.</p>`),
