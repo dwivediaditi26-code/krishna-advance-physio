@@ -3291,7 +3291,8 @@ function genStatement(id){
     const amt=(idx===items.length-1)?Math.round((t.total-allocated)*100)/100:Math.round((t.sub?raw/t.sub*t.total:0)*100)/100;
     allocated+=amt;
     const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+` — ${i.id}, ${i.status}`;
-    linesHTML+=`<div class="stmt-line" style="display:flex;gap:6px;align-items:center;padding:4px 0">
+    linesHTML+=`<div class="stmt-line" data-inv="${i.id}" style="display:flex;gap:6px;align-items:center;padding:4px 0">
+     <span class="sl-no" style="width:24px;flex:none;text-align:right;font-weight:700;font-size:12px;color:var(--muted)"></span>
      <input type="text" class="sl-desc" value="${desc.replace(/"/g,"&quot;")}" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
      <input type="number" class="sl-amt" value="${amt}" oninput="stmtRecalc()" style="width:82px;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
      <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 3px">✕</button>
@@ -3321,30 +3322,37 @@ function addStmtLine(){
  const row=document.createElement("div");
  row.className="stmt-line";
  row.style.cssText="display:flex;gap:6px;align-items:center;padding:4px 0";
- row.innerHTML=`<input type="text" class="sl-desc" placeholder="Description (e.g. Discount)" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
+ row.innerHTML=`<span class="sl-no" style="width:24px;flex:none"></span>
+  <input type="text" class="sl-desc" placeholder="Description (e.g. Discount)" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
   <input type="number" class="sl-amt" value="0" oninput="stmtRecalc()" style="width:82px;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
   <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 3px">✕</button>`;
  box.appendChild(row);
  stmtRecalc();}
 function stmtRecalc(){
  const box=document.getElementById("stmt-lines");if(!box)return;
- let total=0;
- box.querySelectorAll(".sl-amt").forEach(inp=>{total+=+inp.value||0;});
- const totEl=document.getElementById("stmt-total");if(totEl)totEl.textContent=inr(total);}
+ const{grand,rows}=readStmtLines();
+ rows.forEach(r=>{const s=r.el.querySelector(".sl-no");if(s)s.textContent=r.line.no?r.line.no+".":"";}); // keeps 1, 2, 3 … right after a line is removed
+ const totEl=document.getElementById("stmt-total");if(totEl)totEl.textContent=inr(grand);}
+// Serial numbers for the bills on a statement: 1, 2, 3 … A bill that runs over several lines is numbered once, on its first
+// line; extra lines the user typed in (discount etc.) get no number.
+function stmtSerials(rows){let n=0,last=null;return rows.map(r=>{if(r.extra||!r.inv){last=null;return"";}if(r.inv!==last){last=r.inv;return ++n;}return"";});}
 function readStmtLines(){
- const box=document.getElementById("stmt-lines");if(!box)return{groups:[],grand:0};
- const groups=[];let cur=null,grand=0;
+ const box=document.getElementById("stmt-lines");if(!box)return{groups:[],grand:0,rows:[]};
+ const groups=[],rows=[];let cur=null,grand=0;
  [...box.children].forEach(el=>{
-  if(el.classList.contains("stmt-date-h")){cur={date:el.textContent,lines:[]};groups.push(cur);return;}
+  if(el.classList.contains("stmt-date-h")){cur={date:el.textContent,lines:[],extra:el.classList.contains("stmt-extra-h")};groups.push(cur);return;}
   if(el.classList.contains("stmt-line")){
    const desc=el.querySelector(".sl-desc").value;
    const amt=+el.querySelector(".sl-amt").value||0;
    grand+=amt;
-   if(!cur){cur={date:"",lines:[]};groups.push(cur);}
-   cur.lines.push({desc,amt});
+   if(!cur){cur={date:"",lines:[],extra:true};groups.push(cur);}
+   const line={desc,amt,inv:el.dataset.inv||""};
+   cur.lines.push(line);rows.push({el,line,extra:cur.extra});
   }
  });
- return{groups,grand};}
+ const nos=stmtSerials(rows.map(r=>({inv:r.line.inv,extra:r.extra})));
+ rows.forEach((r,i)=>{r.line.no=nos[i];});
+ return{groups,grand,rows};}
 function buildStatementDoc(pid,from,to){
  const p=pById(pid);
  const{groups,grand}=readStmtLines();
@@ -3367,15 +3375,20 @@ function buildStatementDoc(pid,from,to){
  doc.setFontSize(9);doc.setFont("helvetica","normal");doc.text(fmtDate(from)+" to "+fmtDate(to),W-M,y,{align:"right"});y+=7;
  doc.setFontSize(11);doc.setFont("helvetica","bold");doc.text("Bill to: "+p.name+(p.phone?" · "+p.phone:""),M,y);y+=8;
  rule();
+ doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(100);
+ doc.text("S.No.",M+9,y,{align:"right"});doc.text("Description",M+12,y);doc.text("Amount",W-M,y,{align:"right"});
+ doc.setTextColor(0,0,0);y+=5.5;
  groups.forEach(g=>{
   ensureRoom();
   doc.setFont("helvetica","bold");doc.setFontSize(10.5);doc.text(g.date||"Additional",M,y);y+=5.5;
   doc.setFont("helvetica","normal");doc.setFontSize(9.5);
   g.lines.forEach(l=>{
    ensureRoom();
-   doc.text(String(l.desc||""),M+2,y,{maxWidth:W-2*M-40});
+   if(l.no)doc.text(String(l.no),M+9,y,{align:"right"});
+   const parts=doc.splitTextToSize(String(l.desc||"").replace(/₹/g,"Rs. "),W-2*M-52); // wrapped, so a long description never runs into the next line; ₹ -> Rs. because the PDF font can't draw ₹ (it garbled the whole line)
+   doc.text(parts,M+12,y);
    doc.text(pdfInr(l.amt),W-M,y,{align:"right"});
-   y+=5.2;
+   y+=5.2*Math.max(1,parts.length);
   });
   y+=1;
  });
@@ -3409,8 +3422,9 @@ function printStatementNow(id,from,to){
  const p=pById(id);
  const{groups,grand}=readStmtLines();
  if(!groups.length){alert("Nothing to print.");return;}
- const rowsHTML=groups.map(g=>`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px">${g.date||"Additional"}</div>
-  ${g.lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:2px 0"><span>${l.desc}</span><span>${inr(l.amt)}</span></div>`).join("")}
+ const rowsHTML=`<div style="display:flex;gap:10px;font-size:11px;font-weight:700;color:#64748b;padding-top:6px"><span style="width:30px;text-align:right;flex:none">S.No.</span><span style="flex:1">Description</span><span>Amount</span></div>`
+  +groups.map(g=>`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px">${g.date||"Additional"}</div>
+  ${g.lines.map(l=>`<div style="display:flex;gap:10px;font-size:12.5px;padding:2px 0"><span style="width:30px;text-align:right;flex:none;color:#475569">${l.no||""}</span><span style="flex:1">${l.desc}</span><span>${inr(l.amt)}</span></div>`).join("")}
  </div>`).join("");
  const html=`<div style="max-width:800px;margin:0 auto;font-family:inherit">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:2px solid #5b3fa0;background:#fff">
