@@ -1291,6 +1291,23 @@ function discAmtFromInputs(sub,type,val){val=+val||0;if(val<=0)return 0;const am
 function discField(prefix,calcFn){const c=calcFn?calcFn+"()":"";return `<div class="field"><label>Discount <span class="muted" style="font-weight:400">(optional)</span></label><div style="display:flex;gap:6px"><select id="${prefix}_disc_type" style="width:64px;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="${c}"><option value="pct">%</option><option value="flat">₹</option></select><input id="${prefix}_disc_val" type="number" value="0" min="0" placeholder="0" style="width:80px;padding:8px;border:1px solid var(--line);border-radius:8px" oninput="${c}"><input id="${prefix}_disc_reason" placeholder="Reason (e.g. senior citizen)" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px"></div></div>`;}
 function readDisc(prefix){const t=(document.getElementById(prefix+"_disc_type")||{}).value||"pct";const val=+((document.getElementById(prefix+"_disc_val")||{}).value)||0;const reason=(document.getElementById(prefix+"_disc_reason")||{}).value||"";return val>0?{type:t,value:val,reason:reason}:null;}
 function nextInvNo(){const yr=new Date(todayISO).getFullYear();let max=0;DB.invoices.forEach(i=>{const m=(i.id||"").match(new RegExp("INV-"+yr+"-(\\d+)$"));if(m)max=Math.max(max,+m[1]);});return "INV-"+yr+"-"+String(max+1).padStart(3,"0");}
+/* ── BILL NO. — each patient's own running count of bills: 001, 002, 003 … ─────────────────────────
+   Shown on the receipt and on the statement. It is NOT the same as INV-2026-048: that is the clinic's master code, one
+   running number shared by the bills of every patient (so it never repeats, but one patient's bills are not in a row).
+   The master code stays on every bill: "Invoice ID: INV-…" on the receipt and in each statement line. A bill gets its
+   Bill No. once (i.bn) and keeps it, even if an
+   earlier bill is deleted. Bills with none yet (first run after this update, an older backup restored, a new bill) are
+   numbered per patient in date order by ensureBillNumbers(). Wallet top-ups are money added to a wallet, not bills. */
+function billNoOf(i){if(!i)return"";if(!i.bn)ensureBillNumbers();return i.bn?String(i.bn).padStart(3,"0"):"";}
+function ensureBillNumbers(){
+  const all=(DB&&DB.invoices)||[];
+  const todo=all.filter(i=>i&&i.pid&&!i.bn&&i.type!=="wallet-topup");
+  if(!todo.length)return; // normal case: every bill already has its number
+  const last={};all.forEach(i=>{if(i&&i.pid&&i.bn)last[i.pid]=Math.max(last[i.pid]||0,+i.bn||0);});
+  const when=i=>(i.date||"")+" "+(i.time||""); // "YYYY-MM-DD HH:MM" sorts as plain text; undated first; same minute keeps creation order
+  todo.map((i,k)=>({i,k})).sort((a,b)=>when(a.i)<when(b.i)?-1:when(a.i)>when(b.i)?1:a.k-b.k).forEach(({i})=>{i.bn=last[i.pid]=(last[i.pid]||0)+1;});
+  if(todo.length>2)logAudit("Bill No.","Bill Nos. (001, 002 …) given to "+todo.length+" earlier bills, per patient, oldest first","");else save(); // 1-2 = a bill just created; more = the one-off numbering of existing bills
+}
 function painTrendSVG(visits){
  const v=(visits||[]).filter(s=>s.pain!==""&&s.pain!=null&&!isNaN(+s.pain)).slice().sort((a,b)=>(a.date+("0"+a.n).slice(-2)).localeCompare(b.date+("0"+b.n).slice(-2)));
  if(v.length<2)return '<div class="muted" style="font-size:12.5px;padding:4px 0">📈 Pain trend appears after 2+ logged sessions.</div>';
@@ -1323,6 +1340,7 @@ document.getElementById("nav").addEventListener("click",e=>{const b=e.target.clo
 function toggleNav(force){const sb=document.querySelector(".sidebar"),bd=document.getElementById("backdrop"),bn=document.getElementById("bottomNav");const open=force!==undefined?force:!sb.classList.contains("open");sb.classList.toggle("open",open);bd.classList.toggle("show",open);if(bn)bn.style.display=open?"none":"";}
 function render(){
   ensurePatientSerials(); // numbers anyone without a Patient ID yet (first run after this update, an older backup restored, a stale tab); no-op otherwise
+  ensureBillNumbers(); // same idea for each patient's Bill No. 001, 002 …
   // Remember what was focused before the re-render (search boxes trigger render on every keystroke,
   // so without this the input gets destroyed and rebuilt, kicking the mobile keyboard off after 1 letter).
   const active=document.activeElement;
@@ -3120,7 +3138,7 @@ function viewInvoice(id){const i=DB.invoices.find(x=>x.id===id);const p=pById(i.
     <div style="font-size:8px;color:#64748b;margin-top:2px;max-width:280px">${CLINIC_IDENTITY.addressLine1}, ${CLINIC_IDENTITY.addressLine2}</div>
    </div>
   </div>
-  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${i.id}</b><div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(i.status)}">${i.status}</span></div></div>
+  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${billNoOf(i)?"Bill No. "+billNoOf(i):i.id}</b>${billNoOf(i)?`<div style="font-size:11.5px;font-weight:600;color:#475569">Invoice ID: ${i.id}</div>`:""}<div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(i.status)}">${i.status}</span></div></div>
   <div style="margin:6px 0"><b>Bill to:</b> ${p.name} · ${p.phone}${p.addr?`<br><span class="muted">${p.addr}</span>`:""}</div>
   <div style="overflow-x:auto"><table style="min-width:420px"><thead><tr><th>Description</th><th style="white-space:nowrap">Qty</th><th class="tot" style="white-space:nowrap">Rate</th><th class="tot" style="white-space:nowrap">Amount</th></tr></thead><tbody>
   ${i.items.map(it=>`<tr><td>${it.d}${it.qty>1?`<div class="muted" style="font-size:11px">${inr(it.rate)} per session</div>`:""}</td><td>${it.qty}</td><td class="tot" style="white-space:nowrap">${inr(it.rate)}</td><td class="tot" style="white-space:nowrap">${inr(it.qty*it.rate)}</td></tr>`).join("")}</tbody></table></div>
@@ -3169,7 +3187,7 @@ function buildInvoiceHTML(id){const i=DB.invoices.find(x=>x.id===id);if(!i)retur
     <div style="font-size:8px;color:#64748b;margin-top:2px;max-width:280px">${CLINIC_IDENTITY.addressLine1}, ${CLINIC_IDENTITY.addressLine2}</div>
    </div>
   </div>
-  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${i.id}</b><div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(i.status)}">${i.status}</span></div></div>
+  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${billNoOf(i)?"Bill No. "+billNoOf(i):i.id}</b>${billNoOf(i)?`<div style="font-size:11.5px;font-weight:600;color:#475569">Invoice ID: ${i.id}</div>`:""}<div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(i.status)}">${i.status}</span></div></div>
   <div style="margin:6px 0"><b>Bill to:</b> ${p.name} · ${p.phone}${p.addr?`<br><span class="muted">${p.addr}</span>`:""}</div>
   <div style="overflow-x:auto"><table style="min-width:420px"><thead><tr><th>Description</th><th style="white-space:nowrap">Qty</th><th class="tot" style="white-space:nowrap">Rate</th><th class="tot" style="white-space:nowrap">Amount</th></tr></thead><tbody>
   ${i.items.map(it=>`<tr><td>${it.d}${it.qty>1?`<div class="muted" style="font-size:11px">${inr(it.rate)} per session</div>`:""}</td><td>${it.qty}</td><td class="tot" style="white-space:nowrap">${inr(it.rate)}</td><td class="tot" style="white-space:nowrap">${inr(it.qty*it.rate)}</td></tr>`).join("")}</tbody></table></div>
@@ -3290,9 +3308,10 @@ function genStatement(id){
     // the last item absorbs any rounding remainder so the sum always matches exactly.
     const amt=(idx===items.length-1)?Math.round((t.total-allocated)*100)/100:Math.round((t.sub?raw/t.sub*t.total:0)*100)/100;
     allocated+=amt;
-    const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+` — ${i.id}, ${i.status}`;
-    linesHTML+=`<div class="stmt-line" data-inv="${i.id}" style="display:flex;gap:6px;align-items:center;padding:4px 0">
+    const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+` — ${i.id}, ${i.status}`; // each bill keeps its unique Invoice ID (INV-…) on the statement, next to its serial Bill No.
+    linesHTML+=`<div class="stmt-line" data-inv="${i.id}" data-bn="${billNoOf(i)}" style="display:flex;gap:6px;align-items:center;padding:4px 0">
      <span class="sl-no" style="width:24px;flex:none;text-align:right;font-weight:700;font-size:12px;color:var(--muted)"></span>
+     <span class="sl-bn" title="${i.id}" style="width:34px;flex:none;font-weight:700;font-size:12px"></span>
      <input type="text" class="sl-desc" value="${desc.replace(/"/g,"&quot;")}" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
      <input type="number" class="sl-amt" value="${amt}" oninput="stmtRecalc()" style="width:82px;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
      <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 3px">✕</button>
@@ -3322,7 +3341,7 @@ function addStmtLine(){
  const row=document.createElement("div");
  row.className="stmt-line";
  row.style.cssText="display:flex;gap:6px;align-items:center;padding:4px 0";
- row.innerHTML=`<span class="sl-no" style="width:24px;flex:none"></span>
+ row.innerHTML=`<span class="sl-no" style="width:24px;flex:none"></span><span class="sl-bn" style="width:34px;flex:none"></span>
   <input type="text" class="sl-desc" placeholder="Description (e.g. Discount)" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
   <input type="number" class="sl-amt" value="0" oninput="stmtRecalc()" style="width:82px;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
   <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 3px">✕</button>`;
@@ -3331,7 +3350,8 @@ function addStmtLine(){
 function stmtRecalc(){
  const box=document.getElementById("stmt-lines");if(!box)return;
  const{grand,rows}=readStmtLines();
- rows.forEach(r=>{const s=r.el.querySelector(".sl-no");if(s)s.textContent=r.line.no?r.line.no+".":"";}); // keeps 1, 2, 3 … right after a line is removed
+ rows.forEach(r=>{const s=r.el.querySelector(".sl-no");if(s)s.textContent=r.line.no?r.line.no+".":""; // keeps 1, 2, 3 … right after a line is removed
+  const b=r.el.querySelector(".sl-bn");if(b)b.textContent=r.line.bn;}); // a bill's own Bill No. never changes
  const totEl=document.getElementById("stmt-total");if(totEl)totEl.textContent=inr(grand);}
 // Serial numbers for the bills on a statement: 1, 2, 3 … A bill that runs over several lines is numbered once, on its first
 // line; extra lines the user typed in (discount etc.) get no number.
@@ -3346,12 +3366,12 @@ function readStmtLines(){
    const amt=+el.querySelector(".sl-amt").value||0;
    grand+=amt;
    if(!cur){cur={date:"",lines:[],extra:true};groups.push(cur);}
-   const line={desc,amt,inv:el.dataset.inv||""};
+   const line={desc,amt,inv:el.dataset.inv||"",bn:el.dataset.bn||""};
    cur.lines.push(line);rows.push({el,line,extra:cur.extra});
   }
  });
  const nos=stmtSerials(rows.map(r=>({inv:r.line.inv,extra:r.extra})));
- rows.forEach((r,i)=>{r.line.no=nos[i];});
+ rows.forEach((r,i)=>{r.line.no=nos[i];if(!r.line.no)r.line.bn="";}); // like S.No., the Bill No. shows once per bill, on its first line
  return{groups,grand,rows};}
 function buildStatementDoc(pid,from,to){
  const p=pById(pid);
@@ -3376,7 +3396,7 @@ function buildStatementDoc(pid,from,to){
  doc.setFontSize(11);doc.setFont("helvetica","bold");doc.text("Bill to: "+p.name+(p.phone?" · "+p.phone:""),M,y);y+=8;
  rule();
  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(100);
- doc.text("S.No.",M+9,y,{align:"right"});doc.text("Description",M+12,y);doc.text("Amount",W-M,y,{align:"right"});
+ doc.text("S.No.",M+9,y,{align:"right"});doc.text("Bill No.",M+13,y);doc.text("Description",M+28,y);doc.text("Amount",W-M,y,{align:"right"});
  doc.setTextColor(0,0,0);y+=5.5;
  groups.forEach(g=>{
   ensureRoom();
@@ -3385,8 +3405,9 @@ function buildStatementDoc(pid,from,to){
   g.lines.forEach(l=>{
    ensureRoom();
    if(l.no)doc.text(String(l.no),M+9,y,{align:"right"});
-   const parts=doc.splitTextToSize(String(l.desc||"").replace(/₹/g,"Rs. "),W-2*M-52); // wrapped, so a long description never runs into the next line; ₹ -> Rs. because the PDF font can't draw ₹ (it garbled the whole line)
-   doc.text(parts,M+12,y);
+   if(l.bn)doc.text(String(l.bn),M+13,y);
+   const parts=doc.splitTextToSize(String(l.desc||"").replace(/₹/g,"Rs. "),W-2*M-56); // wrapped, so a long description never runs into the next line; ₹ -> Rs. because the PDF font can't draw ₹ (it garbled the whole line)
+   doc.text(parts,M+28,y);
    doc.text(pdfInr(l.amt),W-M,y,{align:"right"});
    y+=5.2*Math.max(1,parts.length);
   });
@@ -3422,9 +3443,9 @@ function printStatementNow(id,from,to){
  const p=pById(id);
  const{groups,grand}=readStmtLines();
  if(!groups.length){alert("Nothing to print.");return;}
- const rowsHTML=`<div style="display:flex;gap:10px;font-size:11px;font-weight:700;color:#64748b;padding-top:6px"><span style="width:30px;text-align:right;flex:none">S.No.</span><span style="flex:1">Description</span><span>Amount</span></div>`
+ const rowsHTML=`<div style="display:flex;gap:10px;font-size:11px;font-weight:700;color:#64748b;padding-top:6px"><span style="width:30px;text-align:right;flex:none">S.No.</span><span style="width:56px;flex:none">Bill No.</span><span style="flex:1">Description</span><span>Amount</span></div>`
   +groups.map(g=>`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px">${g.date||"Additional"}</div>
-  ${g.lines.map(l=>`<div style="display:flex;gap:10px;font-size:12.5px;padding:2px 0"><span style="width:30px;text-align:right;flex:none;color:#475569">${l.no||""}</span><span style="flex:1">${l.desc}</span><span>${inr(l.amt)}</span></div>`).join("")}
+  ${g.lines.map(l=>`<div style="display:flex;gap:10px;font-size:12.5px;padding:2px 0"><span style="width:30px;text-align:right;flex:none;color:#475569">${l.no||""}</span><span style="width:56px;flex:none;font-weight:700">${l.bn||""}</span><span style="flex:1">${l.desc}</span><span>${inr(l.amt)}</span></div>`).join("")}
  </div>`).join("");
  const html=`<div style="max-width:800px;margin:0 auto;font-family:inherit">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:2px solid #5b3fa0;background:#fff">
