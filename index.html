@@ -88,6 +88,12 @@ tr.clk:hover{background:#f7fafc;cursor:pointer}
 .field input,.field select,.field textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;outline:none}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
 .field input[readonly]{background:var(--bg2);color:var(--muted);cursor:default}
+/* Statement preview: one aligned table — S.No. | Date | Bill No. | Invoice ID | Description | Amount (scrolls sideways on a narrow phone rather than squashing) */
+.stmt-box{overflow-x:auto}
+.stmt-row{display:grid;grid-template-columns:28px 84px 56px 100px minmax(140px,1fr) 78px 20px;gap:6px;align-items:center;padding:3px 0;min-width:540px}
+.stmt-head{font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.2px;border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:3px}
+.stmt-row .sl-no,.stmt-row .sl-bn{text-align:center;font-weight:700;font-size:12px}
+.stmt-row .sl-date,.stmt-row .sl-id{font-size:12px;white-space:nowrap}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px}
 .overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;padding:40px 20px;z-index:1100;overflow:auto}
@@ -3297,7 +3303,6 @@ function genStatement(id){
  if(!dates.length){box.innerHTML='<div class="empty" style="padding:16px 0">No billed sessions in this range.</div>';return;}
  let linesHTML="";
  dates.forEach(d=>{
-  linesHTML+=`<div class="stmt-date-h" style="font-weight:700;font-size:12.5px;margin:8px 0 2px">${fmtDate(d)}</div>`;
   byDate[d].forEach(i=>{
    const items=i.items||[];
    const t=invTotals(i);
@@ -3308,19 +3313,22 @@ function genStatement(id){
     // the last item absorbs any rounding remainder so the sum always matches exactly.
     const amt=(idx===items.length-1)?Math.round((t.total-allocated)*100)/100:Math.round((t.sub?raw/t.sub*t.total:0)*100)/100;
     allocated+=amt;
-    const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+` — ${i.id}, ${i.status}`; // each bill keeps its unique Invoice ID (INV-…) on the statement, next to its serial Bill No.
-    linesHTML+=`<div class="stmt-line" data-inv="${i.id}" data-bn="${billNoOf(i)}" style="display:flex;gap:6px;align-items:center;padding:4px 0">
-     <span class="sl-no" style="width:24px;flex:none;text-align:right;font-weight:700;font-size:12px;color:var(--muted)"></span>
-     <span class="sl-bn" title="${i.id}" style="width:34px;flex:none;font-weight:700;font-size:12px"></span>
-     <input type="text" class="sl-desc" value="${desc.replace(/"/g,"&quot;")}" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
-     <input type="number" class="sl-amt" value="${amt}" oninput="stmtRecalc()" style="width:82px;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
-     <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 3px">✕</button>
+    const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+` — ${i.status}`; // the bill's Invoice ID (INV-…) has its own column, so it is not repeated in the text
+    // One row per line; its S.No., Date, Bill No. and Invoice ID cells are filled in by stmtRecalc() (shown once per bill, on its first line)
+    linesHTML+=`<div class="stmt-line stmt-row" data-inv="${i.id}" data-bn="${billNoOf(i)}" data-date="${i.date}">
+     <span class="sl-no"></span><span class="sl-date"></span><span class="sl-bn"></span><span class="sl-id"></span>
+     <input type="text" class="sl-desc" value="${desc.replace(/"/g,"&quot;")}" style="min-width:0;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
+     <input type="number" class="sl-amt" value="${amt}" oninput="stmtRecalc()" style="min-width:0;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
+     <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0">✕</button>
     </div>`;
    });
   });
  });
  box.innerHTML=`<div class="muted" style="font-size:11.5px;margin-bottom:8px">Edit any line — wording, amount, or remove it — before printing or sending. You can add extra lines too (e.g. a discount).</div>
- <div id="stmt-lines" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px">${linesHTML}</div>
+ <div id="stmt-lines" class="stmt-box" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+  <div class="stmt-head stmt-row"><span style="text-align:center">S.No.</span><span>Date</span><span style="text-align:center">Bill No.</span><span>Invoice ID</span><span>Description</span><span style="text-align:right">Amount</span><span></span></div>
+  ${linesHTML}</div>
+ <div class="muted" style="font-size:11px;margin-top:6px"><b>S.No.</b> = line number on this statement · <b>Bill No.</b> = this patient's own bill number · <b>Invoice ID</b> = the clinic's unique code for each bill</div>
  <button type="button" class="btn sm sec" style="margin-top:8px" onclick="addStmtLine()">+ Add line</button>
  <div style="text-align:right;margin-top:10px;font-weight:800;font-size:15px">Total: <span id="stmt-total">₹0</span></div>
  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -3333,56 +3341,46 @@ function addStmtLine(){
  const box=document.getElementById("stmt-lines");if(!box)return;
  if(!box.querySelector(".stmt-extra-h")){
   const h=document.createElement("div");
-  h.className="stmt-date-h stmt-extra-h";
-  h.style.cssText="font-weight:700;font-size:12.5px;margin:8px 0 2px";
+  h.className="stmt-extra-h";
+  h.style.cssText="font-weight:700;font-size:12.5px;margin:10px 0 4px;padding-top:8px;border-top:1px dashed var(--line)";
   h.textContent="Additional";
   box.appendChild(h);
  }
  const row=document.createElement("div");
- row.className="stmt-line";
- row.style.cssText="display:flex;gap:6px;align-items:center;padding:4px 0";
- row.innerHTML=`<span class="sl-no" style="width:24px;flex:none"></span><span class="sl-bn" style="width:34px;flex:none"></span>
-  <input type="text" class="sl-desc" placeholder="Description (e.g. Discount)" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
-  <input type="number" class="sl-amt" value="0" oninput="stmtRecalc()" style="width:82px;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
-  <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 3px">✕</button>`;
+ row.className="stmt-line stmt-row";
+ row.innerHTML=`<span class="sl-no"></span><span class="sl-date"></span><span class="sl-bn"></span><span class="sl-id"></span>
+  <input type="text" class="sl-desc" placeholder="Description (e.g. Discount)" style="min-width:0;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
+  <input type="number" class="sl-amt" value="0" oninput="stmtRecalc()" style="min-width:0;text-align:right;border:1px solid var(--line);border-radius:6px;padding:4px 7px;font-size:12px">
+  <button type="button" onclick="this.closest('.stmt-line').remove();stmtRecalc()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0">✕</button>`;
  box.appendChild(row);
  stmtRecalc();}
 function stmtRecalc(){
  const box=document.getElementById("stmt-lines");if(!box)return;
  const{grand,rows}=readStmtLines();
- rows.forEach(r=>{const s=r.el.querySelector(".sl-no");if(s)s.textContent=r.line.no?r.line.no+".":""; // keeps 1, 2, 3 … right after a line is removed
-  const b=r.el.querySelector(".sl-bn");if(b)b.textContent=r.line.bn;}); // a bill's own Bill No. never changes
+ // S.No., Date, Bill No. and Invoice ID show once per bill, on its first line, and follow the lines as one is removed; a bill's own Bill No. never changes
+ rows.forEach(r=>{const put=(c,v)=>{const s=r.el.querySelector(c);if(s)s.textContent=v;};put(".sl-no",r.line.no);put(".sl-date",r.line.date);put(".sl-bn",r.line.bn);put(".sl-id",r.line.inv);});
  const totEl=document.getElementById("stmt-total");if(totEl)totEl.textContent=inr(grand);}
 // Serial numbers for the bills on a statement: 1, 2, 3 … A bill that runs over several lines is numbered once, on its first
 // line; extra lines the user typed in (discount etc.) get no number.
 function stmtSerials(rows){let n=0,last=null;return rows.map(r=>{if(r.extra||!r.inv){last=null;return"";}if(r.inv!==last){last=r.inv;return ++n;}return"";});}
 function readStmtLines(){
- const box=document.getElementById("stmt-lines");if(!box)return{groups:[],grand:0,rows:[]};
- const groups=[],rows=[];let cur=null,grand=0;
+ const box=document.getElementById("stmt-lines");if(!box)return{lines:[],grand:0,rows:[]};
+ const lines=[],rows=[];let extra=false,grand=0;
  [...box.children].forEach(el=>{
-  if(el.classList.contains("stmt-date-h")){cur={date:el.textContent,lines:[],extra:el.classList.contains("stmt-extra-h")};groups.push(cur);return;}
-  if(el.classList.contains("stmt-line")){
-   const desc=el.querySelector(".sl-desc").value;
-   const amt=+el.querySelector(".sl-amt").value||0;
-   grand+=amt;
-   if(!cur){cur={date:"",lines:[],extra:true};groups.push(cur);}
-   const line={desc,amt,inv:el.dataset.inv||"",bn:el.dataset.bn||""};
-   cur.lines.push(line);rows.push({el,line,extra:cur.extra});
-  }
+  if(el.classList.contains("stmt-extra-h")){extra=true;return;}
+  if(!el.classList.contains("stmt-line"))return;
+  const amt=+el.querySelector(".sl-amt").value||0;grand+=amt;
+  const line={desc:el.querySelector(".sl-desc").value,amt,inv:el.dataset.inv||"",bn:el.dataset.bn||"",date:el.dataset.date?fmtDate(el.dataset.date):"",extra};
+  lines.push(line);rows.push({el,line});
  });
- const nos=stmtSerials(rows.map(r=>({inv:r.line.inv,extra:r.extra})));
- rows.forEach((r,i)=>{r.line.no=nos[i];if(!r.line.no)r.line.bn="";}); // like S.No., the Bill No. shows once per bill, on its first line
- return{groups,grand,rows};}
+ const nos=stmtSerials(lines.map(l=>({inv:l.inv,extra:l.extra})));
+ lines.forEach((l,i)=>{l.no=nos[i];if(!l.no){l.bn="";l.date="";l.inv="";}}); // the 4 cells belong to a bill's first line only
+ return{lines,grand,rows};}
 function buildStatementDoc(pid,from,to){
  const p=pById(pid);
- const{groups,grand}=readStmtLines();
+ const{lines,grand}=readStmtLines();
  const jsPDFLib=(window.jspdf&&window.jspdf.jsPDF)||window.jsPDF;if(!jsPDFLib)return null;
  const doc=new jsPDFLib({unit:"mm",format:"a4"});const W=210,M=16;let y=18;
- function rule(){doc.setDrawColor(200);doc.line(M,y,W-M,y);y+=4;}
- function colHead(){doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(100);
-  doc.text("S.No.",M+9,y,{align:"right"});doc.text("Bill No.",M+13,y);doc.text("Description",M+28,y);doc.text("Amount",W-M,y,{align:"right"});
-  doc.setTextColor(0,0,0);y+=5.5;}
- function ensureRoom(h){if(y+(h||0)>270){doc.addPage();y=20;colHead();return true;}return false;} // every new page repeats the column headings
  doc.addImage(CLINIC_LOGO_ICON_DATAURI,"JPEG",M,4,13,13);
  doc.setTextColor(91,63,160);doc.setFontSize(13);doc.setFont("helvetica","bold");
  doc.text(CLINIC_IDENTITY.brandLine1,M+17,11);doc.text(CLINIC_IDENTITY.brandLine2,M+17,16);
@@ -3396,25 +3394,51 @@ function buildStatementDoc(pid,from,to){
  doc.setTextColor(0,0,0);y=27;
  doc.setFontSize(11);doc.setFont("helvetica","bold");doc.text("STATEMENT OF ACCOUNT",M,y);
  doc.setFontSize(9);doc.setFont("helvetica","normal");doc.text(fmtDate(from)+" to "+fmtDate(to),W-M,y,{align:"right"});y+=7;
- doc.setFontSize(11);doc.setFont("helvetica","bold");doc.text("Bill to: "+p.name+(p.phone?" · "+p.phone:""),M,y);y+=8;
- rule();colHead();
- groups.forEach(g=>{
-  ensureRoom(14); // a date heading never sits alone at the bottom of a page: it needs room for its first bill too
-  doc.setFont("helvetica","bold");doc.setFontSize(10.5);doc.text(g.date||"Additional",M,y);y+=5.5;
-  g.lines.forEach(l=>{
-   if(ensureRoom()){doc.setFont("helvetica","bold");doc.setFontSize(10.5);doc.text((g.date||"Additional")+" (contd.)",M,y);y+=5.5;} // a date that runs over onto the next page is named again there
-   doc.setFont("helvetica","normal");doc.setFontSize(9.5);
-   if(l.no)doc.text(String(l.no),M+9,y,{align:"right"});
-   if(l.bn)doc.text(String(l.bn),M+13,y);
-   const parts=doc.splitTextToSize(String(l.desc||"").replace(/₹/g,"Rs. "),W-2*M-56); // wrapped, so a long description never runs into the next line; ₹ -> Rs. because the PDF font can't draw ₹ (it garbled the whole line)
-   doc.text(parts,M+28,y);
-   doc.text(pdfInr(l.amt),W-M,y,{align:"right"});
-   y+=5.2*Math.max(1,parts.length);
+ doc.setFontSize(11);doc.setFont("helvetica","bold");doc.text("Bill to: "+p.name+(p.phone?" · "+p.phone:""),M,y);y+=5.5;
+ doc.setFontSize(7.5);doc.setFont("helvetica","normal");doc.setTextColor(110);
+ doc.text("S.No. = line number on this statement   |   Bill No. = this patient's own bill number   |   Invoice ID = the clinic's unique code for each bill",M,y);y+=5;
+ doc.setTextColor(0,0,0);
+ // ── the table: S.No. | Date | Bill No. | Invoice ID | Description | Amount — every column lined up, headings repeated on each page ──
+ const C=[M,M+12,M+36,M+51,M+80,W-M-24,W-M],PAD=2,LIM=270,TOTAL_H=8;
+ const vlines=(y0,y1)=>{doc.setDrawColor(210);doc.setLineWidth(0.2);C.forEach(x=>doc.line(x,y0,x,y1));};
+ const hline=yy=>{doc.setDrawColor(210);doc.setLineWidth(0.2);doc.line(C[0],yy,C[6],yy);};
+ function colHead(){
+  doc.setFillColor(238,234,248);doc.rect(C[0],y,C[6]-C[0],7,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8.5);doc.setTextColor(60,40,110);
+  const ty=y+4.8;
+  doc.text("S.No.",(C[0]+C[1])/2,ty,{align:"center"});doc.text("Date",C[1]+PAD,ty);doc.text("Bill No.",(C[2]+C[3])/2,ty,{align:"center"});
+  doc.text("Invoice ID",C[3]+PAD,ty);doc.text("Description",C[4]+PAD,ty);doc.text("Amount",C[6]-PAD,ty,{align:"right"});
+  vlines(y,y+7);hline(y);hline(y+7);doc.setTextColor(0,0,0);y+=7;}
+ // wrap each description to its column (₹ -> Rs. because the PDF font cannot draw ₹ and garbled the whole line)
+ doc.setFont("helvetica","normal");doc.setFontSize(9);
+ let extraStarted=false;
+ const rows=lines.map(l=>{const parts=doc.splitTextToSize(String(l.desc||"").replace(/₹/g,"Rs. "),C[5]-C[4]-2*PAD);
+  return{l,parts,h:7+4*(parts.length-1),head:(l.extra&&!extraStarted)?(extraStarted=true,7):0};});
+ // a bill's lines stay together on one page (and the last bill stays with the TOTAL row)
+ const blocks=[];rows.forEach(r=>{if(!blocks.length||r.l.no||r.l.extra||r.head)blocks.push([r]);else blocks[blocks.length-1].push(r);});
+ colHead();
+ blocks.forEach((b,bi)=>{
+  const need=b.reduce((s,r)=>s+r.h+r.head,0)+(bi===blocks.length-1?TOTAL_H:0);
+  if(y+need>LIM){doc.addPage();y=20;colHead();}
+  b.forEach(r=>{
+   if(r.head){doc.setFillColor(246,246,250);doc.rect(C[0],y,C[6]-C[0],7,"F");doc.setFont("helvetica","bold");doc.setFontSize(9);doc.text("Additional",C[0]+PAD,y+4.8);
+    doc.setDrawColor(210);doc.setLineWidth(0.2);doc.line(C[0],y,C[0],y+7);doc.line(C[6],y,C[6],y+7);hline(y+7);y+=7;}
+   const l=r.l,ty=y+4.8;
+   doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(0,0,0);
+   if(l.no)doc.text(String(l.no),(C[0]+C[1])/2,ty,{align:"center"});
+   if(l.date)doc.text(l.date,C[1]+PAD,ty);
+   if(l.bn){doc.setFont("helvetica","bold");doc.text(String(l.bn),(C[2]+C[3])/2,ty,{align:"center"});doc.setFont("helvetica","normal");}
+   if(l.inv)doc.text(l.inv,C[3]+PAD,ty);
+   doc.text(r.parts,C[4]+PAD,ty,{lineHeightFactor:1.25});
+   doc.text(pdfInr(l.amt),C[6]-PAD,ty,{align:"right"});
+   vlines(y,y+r.h);hline(y+r.h);y+=r.h;
   });
-  y+=1;
  });
- rule();
- doc.setFont("helvetica","bold");doc.setFontSize(12);doc.text("TOTAL",M,y);doc.text(pdfInr(grand),W-M,y,{align:"right"});y+=8;
+ doc.setFillColor(238,234,248);doc.rect(C[0],y,C[6]-C[0],TOTAL_H,"F");
+ doc.setFont("helvetica","bold");doc.setFontSize(10);doc.setTextColor(0,0,0);
+ doc.text("TOTAL",C[5]-PAD,y+5.5,{align:"right"});doc.text(pdfInr(grand),C[6]-PAD,y+5.5,{align:"right"});
+ doc.setDrawColor(210);doc.setLineWidth(0.2);doc.line(C[0],y,C[0],y+TOTAL_H);doc.line(C[5],y,C[5],y+TOTAL_H);doc.line(C[6],y,C[6],y+TOTAL_H);hline(y);hline(y+TOTAL_H);
+ y+=TOTAL_H+6;
  doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(100);doc.text("Computer-generated statement — "+(DB.settings.clinic||""),M,y);
  return{doc,p,grand};}
 function downloadStatementPDF(id,from,to){
@@ -3441,12 +3465,17 @@ async function shareStatementPDF(id,from,to){
  sendWA(id,"Statement","PDF downloaded — opened WhatsApp",`Hi ${built.p.name.split(" ")[0]} 👋\n\nSharing your statement from *${DB.settings.clinic}* (${fmtDate(from)} – ${fmtDate(to)}) — please find the attached PDF.`);}
 function printStatementNow(id,from,to){
  const p=pById(id);
- const{groups,grand}=readStmtLines();
- if(!groups.length){alert("Nothing to print.");return;}
- const rowsHTML=`<div style="display:flex;gap:10px;font-size:11px;font-weight:700;color:#64748b;padding-top:6px"><span style="width:30px;text-align:right;flex:none">S.No.</span><span style="width:56px;flex:none">Bill No.</span><span style="flex:1">Description</span><span>Amount</span></div>`
-  +groups.map(g=>`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px">${g.date||"Additional"}</div>
-  ${g.lines.map(l=>`<div style="display:flex;gap:10px;font-size:12.5px;padding:2px 0"><span style="width:30px;text-align:right;flex:none;color:#475569">${l.no||""}</span><span style="width:56px;flex:none;font-weight:700">${l.bn||""}</span><span style="flex:1">${l.desc}</span><span>${inr(l.amt)}</span></div>`).join("")}
- </div>`).join("");
+ const{lines,grand}=readStmtLines();
+ if(!lines.length){alert("Nothing to print.");return;}
+ const td="padding:6px 8px;border:1px solid #e5e7eb;vertical-align:top";
+ let extraStarted=false;
+ const rowsHTML=lines.map(l=>{
+  const head=(l.extra&&!extraStarted)?(extraStarted=true,`<tr><td colspan="6" style="${td};background:#f6f6fa;font-weight:700">Additional</td></tr>`):"";
+  return head+`<tr><td style="${td};text-align:center">${l.no||""}</td><td style="${td};white-space:nowrap">${l.date||""}</td><td style="${td};text-align:center;font-weight:700">${l.bn||""}</td><td style="${td};white-space:nowrap">${l.inv||""}</td><td style="${td}">${l.desc}</td><td style="${td};text-align:right;white-space:nowrap">${inr(l.amt)}</td></tr>`;}).join("");
+ const th=(t,al)=>`<th style="${td};text-align:${al};white-space:nowrap">${t}</th>`;
+ const tableHTML=`<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px">
+   <thead><tr style="background:#eeeaf8;color:#3c286e;font-size:11.5px">${th("S.No.","center")}${th("Date","left")}${th("Bill No.","center")}${th("Invoice ID","left")}${th("Description","left")}${th("Amount","right")}</tr></thead>
+   <tbody>${rowsHTML}<tr style="background:#eeeaf8;font-weight:800;font-size:14px"><td colspan="5" style="${td};text-align:right">TOTAL</td><td style="${td};text-align:right;white-space:nowrap">${inr(grand)}</td></tr></tbody></table>`;
  const html=`<div style="max-width:800px;margin:0 auto;font-family:inherit">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:2px solid #5b3fa0;background:#fff">
    <div style="display:flex;align-items:center;gap:10px">
@@ -3463,11 +3492,9 @@ function printStatementNow(id,from,to){
    <div style="text-align:right;font-size:12px"><div style="font-weight:700">STATEMENT OF ACCOUNT</div><div>${fmtDate(from)} to ${fmtDate(to)}</div></div>
   </div>
   <div style="border:1px solid #e5e7eb;border-top:none;padding:16px 20px;border-radius:0 0 8px 8px">
-   <div style="font-weight:700;margin-bottom:8px">Bill to: ${p.name}${p.phone?" · "+p.phone:""}</div>
-   <hr style="border:none;border-top:1px solid #e5e7eb">
-   ${rowsHTML}
-   <hr style="border:none;border-top:1px solid #e5e7eb;margin-top:12px">
-   <div style="display:flex;justify-content:space-between;font-weight:800;font-size:16px;margin-top:8px"><span>Total</span><span>${inr(grand)}</span></div>
+   <div style="font-weight:700;margin-bottom:4px">Bill to: ${p.name}${p.phone?" · "+p.phone:""}</div>
+   <div style="font-size:10.5px;color:#6b7280;margin-bottom:6px"><b>S.No.</b> = line number on this statement · <b>Bill No.</b> = this patient's own bill number · <b>Invoice ID</b> = the clinic's unique code for each bill</div>
+   ${tableHTML}
    <div style="font-size:11px;color:#888;margin-top:16px">Computer-generated statement — ${DB.settings.clinic}</div>
   </div>
  </div>`;
