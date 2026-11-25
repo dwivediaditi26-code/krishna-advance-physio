@@ -1291,6 +1291,9 @@ function invTotals(inv){const items=Array.isArray(inv.items)?inv.items:[];const 
 // (Collected, Outstanding, Revenue) must use these instead of a raw status==='Paid' filter, or a
 // Partial invoice's real collected/owed amounts silently vanish from every summary.
 function invCollected(inv){if(inv.status==='Paid')return invTotals(inv).total;if(inv.status==='Partial')return inv.paid||0;return 0;}
+// FOC = free of charge: the whole bill is ₹0 (payment mode "FOC"). Older bills logged as "No charge" are the same thing.
+const isFocInv=i=>!!i&&(i.mode==="FOC"||i.mode==="No charge");
+const invStatusLabel=i=>isFocInv(i)?"FOC":i.status; // what the tag on a bill says: "FOC" instead of "Paid"
 function addInvByMode(map,inv,fallback){const sp=inv.splitPayments;if(sp&&sp.length&&inv.status==='Paid'){sp.forEach(r=>{const m=r.mode==='Wallet (advance)'?'Wallet':(r.mode||fallback);map[m]=(map[m]||0)+(+r.amount||0);});}else{const m=inv.mode||fallback;map[m]=(map[m]||0)+invCollected(inv);}}
 function invDue(inv){if(inv.status==='Pending')return invTotals(inv).total;if(inv.status==='Partial')return inv.pending!=null?inv.pending:Math.max(0,invTotals(inv).total-(inv.paid||0));return 0;}
 function discAmtFromInputs(sub,type,val){val=+val||0;if(val<=0)return 0;const amt=type==="flat"?val:Math.round(sub*val)/100;return Math.max(0,Math.min(amt,sub));}
@@ -1330,7 +1333,7 @@ function painTrendSVG(visits){
    <path d="${line}" fill="none" stroke="#7c5cc4" stroke-width="2.5"/>
    ${pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${col(v[i].pain)}"/><text x="${p[0]}" y="${p[1]-7}" font-size="10" fill="#1a2233" text-anchor="middle">${v[i].pain}</text><text x="${p[0]}" y="${H-6}" font-size="9" fill="#6b7589" text-anchor="middle">#${v[i].n}</text>`).join("")}
   </svg>`;}
-const statusTag=s=>({Confirmed:"blue","Checked-in":"teal",Pending:"amber",Completed:"green",Cancelled:"red",Paid:"green",Delivered:"green",Sent:"teal",Scheduled:"amber",Active:"green",Expired:"red",Late:"red"}[s]||"gray");
+const statusTag=s=>({Confirmed:"blue","Checked-in":"teal",Pending:"amber",Completed:"green",Cancelled:"red",FOC:"blue",Paid:"green",Delivered:"green",Sent:"teal",Scheduled:"amber",Active:"green",Expired:"red",Late:"red"}[s]||"gray");
 // An appointment is "Late" once its scheduled time has passed today and the patient
 // hasn't been checked in, completed, or cancelled.
 function isApptLate(a){return a&&a.date===todayISO&&a.time&&a.time<nowTime()&&a.status!=="Checked-in"&&a.status!=="Completed"&&a.status!=="Cancelled";}
@@ -1605,7 +1608,7 @@ function patientView(id,tab){const p=pById(id);const T=tab||"assess";
    <hr class="sep"><b class="muted">Packages taken</b>
    ${pkgs.length?pkgs.map(k=>{const bal=(k.price||0)-(k.paidAmount!=null?k.paidAmount:(k.price||0));const pct=k.total?Math.round((k.used||0)/k.total*100):0;return `<div class="list-row"><div style="display:flex;justify-content:space-between;align-items:start"><b>${k.pkg||k.name||'Package'}</b><span class="tag ${statusTag(k.status)}">${k.status}</span></div><div class="bar" style="margin:5px 0"><div style="width:${pct}%"></div></div><div class="mt muted">${k.used||0}/${k.total||0} used · ${inr((k.paidAmount!=null?k.paidAmount:(k.price||0)))} paid of ${inr(k.price||0)}${bal>0?` · <b style="color:var(--danger)">₹${bal.toLocaleString('en-IN')} due</b>`:' · <b style="color:var(--ok)">Fully paid</b>'} · expires ${fmtDate(k.expires)}</div></div>`}).join(""):'<div class=muted style="padding:6px 0">No packages taken.</div>'}
    <hr class="sep"><b class="muted">Invoices</b>
-   ${invs.length?invs.map(i=>`<div class="list-row clk" style="display:flex;justify-content:space-between;align-items:center" onclick="viewInvoice('${i.id}')"><span>${i.id} · ${fmtDate(i.date)}<br><span class="muted" style="font-size:11.5px">${i.items&&i.items[0]?i.items[0].d:''}</span></span><span style="text-align:right">${inr(invTotals(i).total)} <span class="tag ${statusTag(i.status)}">${i.status}</span>${i.status==='Pending'?`<br><button class="btn sm" style="margin-top:4px" onclick="event.stopPropagation();markPaid('${i.id}')">Mark paid</button>`:''}</span></div>`).join(""):'<div class=muted>No invoices.</div>'}
+   ${invs.length?invs.map(i=>`<div class="list-row clk" style="display:flex;justify-content:space-between;align-items:center" onclick="viewInvoice('${i.id}')"><span>${i.id} · ${fmtDate(i.date)}<br><span class="muted" style="font-size:11.5px">${i.items&&i.items[0]?i.items[0].d:''}</span></span><span style="text-align:right">${inr(invTotals(i).total)} <span class="tag ${statusTag(invStatusLabel(i))}">${invStatusLabel(i)}</span>${i.status==='Pending'?`<br><button class="btn sm" style="margin-top:4px" onclick="event.stopPropagation();markPaid('${i.id}')">Mark paid</button>`:''}</span></div>`).join(""):'<div class=muted>No invoices.</div>'}
   </div>
  </div>
  <div class="modal-f"><button class="btn sec" onclick="closeModal()">Close</button><button class="btn sec" onclick="patientForm('${id}')">Edit patient</button></div>`,true);}
@@ -2387,7 +2390,7 @@ function paySession(planId,sid){
   +'<div class="field"><label style="display:flex;align-items:center;gap:7px;font-weight:400"><input type="checkbox" id="s_split" onchange="splitPayToggle(\'s\')" style="width:auto"> Split payment (e.g. part cash, part UPI)</label></div>'
   +'<div class="grid2" style="margin-top:6px">'
   +'<div class="field"><label>Session fee (₹)</label><input id="s_fee" type="number" value="800" oninput="updateSessionBillSummary()"></div>'
-  +'<div class="field" id="s_mode_wrap"><label>Payment mode</label><select id="s_pay" onchange="updateSessionBillSummary()"><option>UPI</option><option>Cash</option><option>Card</option><option>Wallet (advance)</option><option>Package session</option><option>Corporate / Insurance</option><option>Bill later</option><option>No charge</option></select></div>'
+  +'<div class="field" id="s_mode_wrap"><label>Payment mode</label><select id="s_pay" onchange="updateSessionBillSummary()"><option>UPI</option><option>Cash</option><option>Card</option><option>Wallet (advance)</option><option>Package session</option><option>Corporate / Insurance</option><option>Bill later</option><option value="FOC">FOC (free of charge)</option></select></div>'
   +'</div>'
   +'<div id="s_split_wrap" data-total="0" style="display:none;margin-bottom:13px">'
   +'<div id="s_split_rows"></div>'
@@ -2434,9 +2437,12 @@ function saveSessionPayment(planId,sid){
   var sInv={id:invNum,pid:t.pid,date:todayISO,time:nowTime(),items:items,gst:0,status:"Paid",mode:splitPayments.map(function(r){return r.mode+" "+inr(r.amount);}).join(" + "),branch:branch,splitPayments:splitPayments};
   if(discObj)sInv.discount=discObj;
   DB.invoices.push(sInv);
- } else if(pay==="No charge"){
-  // Log as complimentary invoice
-  DB.invoices.push({id:invNum,pid:t.pid,date:todayISO,time:nowTime(),items:[{d:"Physiotherapy session (complimentary)",qty:1,rate:0}],gst:0,status:"Paid",mode:"No charge",branch:branch});
+ } else if(pay==="FOC"||pay==="No charge"){
+  // Free of charge (FOC): the session — and any consultation fee added to this visit — is billed at ₹0
+  var focItems=[{d:"Physiotherapy session (FOC)",qty:1,rate:0}];
+  if(consultFee>0)focItems.push({d:"Consultation fee (FOC)",qty:1,rate:0});
+  DB.invoices.push({id:invNum,pid:t.pid,date:todayISO,time:nowTime(),items:focItems,gst:0,status:"Paid",mode:"FOC",branch:branch});
+  logAudit("Invoice created","FOC — free of charge (₹0) ("+invNum+")",p.name);
  } else if(pay==="Package session"){
   // Deduct from patientPkgs. The session itself is already fully paid for as part of the
   // package purchase, so it's logged at ₹0 here — charging the session fee again would be
@@ -2521,7 +2527,8 @@ function updateSessionBillSummary(){
  const consultFee=addConsult?(+((document.getElementById("s_consult_fee")||{}).value)||0):0;
  const discType=(document.getElementById("s_disc_type")||{}).value||"pct";
  const discVal=+((document.getElementById("s_disc_val")||{}).value)||0;
- const discSub=(!isSplit&&(mode==="Package session"||mode==="No charge")?0:fee)+consultFee;
+ const isFoc=!isSplit&&(mode==="FOC"||mode==="No charge"); // free of charge: the whole bill is ₹0
+ const discSub=(!isSplit&&mode==="Package session"||isFoc?0:fee)+(isFoc?0:consultFee);
  const discAmt=discAmtFromInputs(discSub,discType,discVal);
  const splitWrap=document.getElementById("s_split_wrap");
  if(splitWrap){splitWrap.dataset.total=Math.max(0,discSub-discAmt);splitPayCalc("s");}
@@ -2529,12 +2536,12 @@ function updateSessionBillSummary(){
  if(!summary)return;
  const lines=[];
  if(!isSplit&&mode==="Package session"){lines.push("Session: covered by package (₹0)");}
- else if(!isSplit&&mode==="No charge"){lines.push("Session: complimentary (₹0)");}
+ else if(isFoc){lines.push("Session: FOC — free of charge (₹0)");}
  else{
    if(partial>0&&partial<fee)lines.push("Session: ₹"+fee.toLocaleString("en-IN")+" (collecting ₹"+partial.toLocaleString("en-IN")+" now, ₹"+(fee-partial).toLocaleString("en-IN")+" pending)");
    else lines.push("Session: ₹"+fee.toLocaleString("en-IN"));
  }
- if(consultFee>0){lines.push("Consult: ₹"+consultFee.toLocaleString("en-IN"));}
+ if(consultFee>0){lines.push(isFoc?"Consult: FOC (₹0)":"Consult: ₹"+consultFee.toLocaleString("en-IN"));}
  if(discAmt>0)lines.push("Discount: −₹"+discAmt.toLocaleString("en-IN")+(discType==="pct"?" ("+discVal+"%)":""));
  summary.innerHTML=lines.map(l=>"✓ "+l).join("<br>");
  summary.style.display=lines.length?"block":"none";
@@ -2888,7 +2895,7 @@ views.billing=()=>{const inv=DB.invoices.filter(inBranch).slice().sort((a,b)=>b.
  const q=_invSearch.toLowerCase().trim();
  const filtered=inv.filter(i=>{const p=pById(i.pid);const nameMatch=!q||p.name.toLowerCase().includes(q)||i.id.toLowerCase().includes(q);const dateMatch=!_invDate||i.date===_invDate;const monthMatch=!_invMonth||(i.date||"").startsWith(_invMonth);return nameMatch&&monthMatch&&dateMatch;});
  const isFiltering=!!(q||_invDate||_invMonth);
- const rowHTML=i=>{const p=pById(i.pid);const desc=(i.items&&i.items[0]&&i.items[0].d)||'';return `<tr class="clk" onclick="viewInvoice('${i.id}')"><td><b>${i.id}</b></td><td>${p.name}</td><td>${fmtDate(i.date)}${i.time?`<div class="muted" style="font-size:10.5px">${i.time}</div>`:''}</td><td><b>${inr(invTotals(i).total)}</b></td><td>${i.mode}<div class="muted" style="font-size:10.5px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${desc}</div></td><td><span class="tag ${statusTag(i.status)}">${i.status}</span></td><td style="text-align:right">${i.status==='Pending'?`<button class="btn sm" onclick="event.stopPropagation();markPaid('${i.id}')">Mark paid</button> <button class="btn sm sec" onclick="event.stopPropagation();payRemind('${i.id}')">🔔</button>`:'<span class="muted">✓</span>'}</td></tr>`;};
+ const rowHTML=i=>{const p=pById(i.pid);const desc=(i.items&&i.items[0]&&i.items[0].d)||'';return `<tr class="clk" onclick="viewInvoice('${i.id}')"><td><b>${i.id}</b></td><td>${p.name}</td><td>${fmtDate(i.date)}${i.time?`<div class="muted" style="font-size:10.5px">${i.time}</div>`:''}</td><td><b>${inr(invTotals(i).total)}</b></td><td>${i.mode}<div class="muted" style="font-size:10.5px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${desc}</div></td><td><span class="tag ${statusTag(invStatusLabel(i))}">${invStatusLabel(i)}</span></td><td style="text-align:right">${i.status==='Pending'?`<button class="btn sm" onclick="event.stopPropagation();markPaid('${i.id}')">Mark paid</button> <button class="btn sm sec" onclick="event.stopPropagation();payRemind('${i.id}')">🔔</button>`:'<span class="muted">✓</span>'}</td></tr>`;};
  let invTableHTML;
  if(isFiltering){
    invTableHTML=`<table><thead><tr><th>Invoice #</th><th>Patient</th><th>Date</th><th>Amount</th><th>Mode</th><th>Status</th><th></th></tr></thead><tbody>
@@ -3043,10 +3050,11 @@ function consultInvForm(pid){openModal(`<div class="modal-h"><h3>Consultation In
   </div>
   <div class="field"><label>Description</label><input id="ci_desc" value="Initial assessment & consultation"></div>
   <div class="grid2">
-   <div class="field"><label>Payment mode</label><select id="ci_mode"><option>UPI</option><option>Cash</option><option>Card</option><option>Wallet (advance)</option><option>Bill later</option></select></div>
+   <div class="field"><label>Payment mode</label><select id="ci_mode" onchange="document.getElementById('ci_foc_note').style.display=this.value==='FOC'?'block':'none'"><option>UPI</option><option>Cash</option><option>Card</option><option>Wallet (advance)</option><option>Bill later</option><option value="FOC">FOC (free of charge)</option></select></div>
    <div class="field"><label>Therapist</label><select id="ci_ther">${DB.staff.map(s=>`<option ${MYTHER===s.name?'selected':''}>${s.name}</option>`).join("")}</select></div>
   </div>
   ${discField("ci")}
+  <div id="ci_foc_note" class="muted" style="display:none;font-size:12.5px;margin-bottom:6px"><span class="tag blue">FOC</span> This consultation is free of charge — the invoice will be saved at ₹0, whatever fee is typed above.</div>
   <div class="muted" style="font-size:12.5px">This is a standalone consultation fee not linked to a session.</div>
  </div>
  <div class="modal-f"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveConsultInv()">Generate Invoice</button></div>`);}
@@ -3055,11 +3063,12 @@ function saveConsultInv(){const v=k=>document.getElementById(k).value;const pid=
  let inv={id:nextInvNo(),pid,date:v("ci_date"),time:nowTime(),items:[{d:v("ci_desc")||"Consultation fee",qty:1,rate:fee}],gst:0,branch:p.branch};
  if(discObj)inv.discount=discObj;
  const gross=fee-(discObj?discAmtFromInputs(fee,discObj.type,discObj.value):0);
- if(mode==="Wallet (advance)"){if((p.wallet||0)>=gross){p.wallet-=gross;inv.status="Paid";inv.mode="Wallet";}else{alert("Insufficient wallet balance ("+inr(p.wallet||0)+").");return;}}
+ if(mode==="FOC"){inv.items=[{d:(v("ci_desc")||"Consultation fee")+" (FOC)",qty:1,rate:0}];delete inv.discount;inv.status="Paid";inv.mode="FOC";} // free of charge: ₹0, nothing to collect
+ else if(mode==="Wallet (advance)"){if((p.wallet||0)>=gross){p.wallet-=gross;inv.status="Paid";inv.mode="Wallet";}else{alert("Insufficient wallet balance ("+inr(p.wallet||0)+").");return;}}
  else if(mode==="Bill later"){inv.status="Pending";inv.mode="—";}
  else{inv.status="Paid";inv.mode=mode;}
  DB.invoices.push(inv);
- logAudit("Invoice created",inr(fee)+" consultation via "+inv.mode+" ("+inv.id+")",p.name);
+ logAudit("Invoice created",(inv.mode==="FOC"?"FOC consultation (₹0)":inr(fee)+" consultation via "+inv.mode)+" ("+inv.id+")",p.name);
  save();closeModal();render();}
 /* SPLIT PAYMENT — shared by Mark Paid and New Invoice. A "prefix" (e.g. "mp", "i") namespaces
    the DOM ids so the same helpers work in more than one modal at once. */
@@ -3069,6 +3078,7 @@ function splitPayToggle(prefix){
  document.getElementById(prefix+"_mode_wrap").style.display=on?"none":"";
  document.getElementById(prefix+"_split_wrap").style.display=on?"":"none";
  if(on&&!document.getElementById(prefix+"_split_rows").children.length){splitPayAddRow(prefix);splitPayAddRow(prefix);}
+ if(prefix==="i")invCalc(); // the New Invoice total changes if FOC was picked and split is now switched on/off
 }
 function splitPayAddRow(prefix){
  const rows=document.getElementById(prefix+"_split_rows");
@@ -3144,7 +3154,7 @@ function viewInvoice(id){const i=DB.invoices.find(x=>x.id===id);const p=pById(i.
     <div style="font-size:8px;color:#64748b;margin-top:2px;max-width:280px">${CLINIC_IDENTITY.addressLine1}, ${CLINIC_IDENTITY.addressLine2}</div>
    </div>
   </div>
-  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${billNoOf(i)?"Bill No. "+billNoOf(i):i.id}</b>${billNoOf(i)?`<div style="font-size:11.5px;font-weight:600;color:#475569">Invoice ID: ${i.id}</div>`:""}<div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(i.status)}">${i.status}</span></div></div>
+  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${billNoOf(i)?"Bill No. "+billNoOf(i):i.id}</b>${billNoOf(i)?`<div style="font-size:11.5px;font-weight:600;color:#475569">Invoice ID: ${i.id}</div>`:""}<div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(invStatusLabel(i))}">${invStatusLabel(i)}</span></div></div>
   <div style="margin:6px 0"><b>Bill to:</b> ${p.name} · ${p.phone}${p.addr?`<br><span class="muted">${p.addr}</span>`:""}</div>
   <div style="overflow-x:auto"><table style="min-width:420px"><thead><tr><th>Description</th><th style="white-space:nowrap">Qty</th><th class="tot" style="white-space:nowrap">Rate</th><th class="tot" style="white-space:nowrap">Amount</th></tr></thead><tbody>
   ${i.items.map(it=>`<tr><td>${it.d}${it.qty>1?`<div class="muted" style="font-size:11px">${inr(it.rate)} per session</div>`:""}</td><td>${it.qty}</td><td class="tot" style="white-space:nowrap">${inr(it.rate)}</td><td class="tot" style="white-space:nowrap">${inr(it.qty*it.rate)}</td></tr>`).join("")}</tbody></table></div>
@@ -3193,7 +3203,7 @@ function buildInvoiceHTML(id){const i=DB.invoices.find(x=>x.id===id);if(!i)retur
     <div style="font-size:8px;color:#64748b;margin-top:2px;max-width:280px">${CLINIC_IDENTITY.addressLine1}, ${CLINIC_IDENTITY.addressLine2}</div>
    </div>
   </div>
-  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${billNoOf(i)?"Bill No. "+billNoOf(i):i.id}</b>${billNoOf(i)?`<div style="font-size:11.5px;font-weight:600;color:#475569">Invoice ID: ${i.id}</div>`:""}<div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(i.status)}">${i.status}</span></div></div>
+  <div class="inv-h" style="justify-content:flex-end"><div style="text-align:right"><b>${billNoOf(i)?"Bill No. "+billNoOf(i):i.id}</b>${billNoOf(i)?`<div style="font-size:11.5px;font-weight:600;color:#475569">Invoice ID: ${i.id}</div>`:""}<div class="muted">${fmtDate(i.date)}${i.time?' · '+i.time:''}${bName(i.branch)?' · '+bName(i.branch):''}</div><span class="tag ${statusTag(invStatusLabel(i))}">${invStatusLabel(i)}</span></div></div>
   <div style="margin:6px 0"><b>Bill to:</b> ${p.name} · ${p.phone}${p.addr?`<br><span class="muted">${p.addr}</span>`:""}</div>
   <div style="overflow-x:auto"><table style="min-width:420px"><thead><tr><th>Description</th><th style="white-space:nowrap">Qty</th><th class="tot" style="white-space:nowrap">Rate</th><th class="tot" style="white-space:nowrap">Amount</th></tr></thead><tbody>
   ${i.items.map(it=>`<tr><td>${it.d}${it.qty>1?`<div class="muted" style="font-size:11px">${inr(it.rate)} per session</div>`:""}</td><td>${it.qty}</td><td class="tot" style="white-space:nowrap">${inr(it.rate)}</td><td class="tot" style="white-space:nowrap">${inr(it.qty*it.rate)}</td></tr>`).join("")}</tbody></table></div>
@@ -3313,7 +3323,7 @@ function genStatement(id){
     // the last item absorbs any rounding remainder so the sum always matches exactly.
     const amt=(idx===items.length-1)?Math.round((t.total-allocated)*100)/100:Math.round((t.sub?raw/t.sub*t.total:0)*100)/100;
     allocated+=amt;
-    const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+` — ${i.status}`; // the bill's Invoice ID (INV-…) has its own column, so it is not repeated in the text
+    const desc=(it.d||"")+(it.qty>1?` (₹${it.rate} × ${it.qty})`:"")+(isFocInv(i)?"":` — ${i.status}`); // the bill's Invoice ID (INV-…) has its own column, so it is not repeated in the text; a free-of-charge bill already says "(FOC)" in its item, so no "— Paid" after it
     // One row per line; its S.No., Date, Bill No. and Invoice ID cells are filled in by stmtRecalc() (shown once per bill, on its first line)
     linesHTML+=`<div class="stmt-line stmt-row" data-inv="${i.id}" data-bn="${billNoOf(i)}" data-date="${i.date}">
      <span class="sl-no"></span><span class="sl-date"></span><span class="sl-bn"></span><span class="sl-id"></span>
@@ -3519,13 +3529,13 @@ function invForm(){const svcs=(DB.billingServices||[]).slice().sort((a,b)=>a.d.l
   </div>
   ${discField("i","invCalc")}
   <div class="field"><label style="display:flex;align-items:center;gap:7px;font-weight:400"><input type="checkbox" id="i_split" onchange="splitPayToggle('i')" style="width:auto"> Split payment (e.g. part cash, part UPI)</label></div>
-  <div id="i_mode_wrap"><div class="field"><label>Payment mode</label><select id="i_mode"><option>UPI</option><option>Card</option><option>Cash</option><option>Wallet</option><option>Package session</option><option>Pending</option></select></div></div>
+  <div id="i_mode_wrap"><div class="field"><label>Payment mode</label><select id="i_mode" onchange="invCalc()"><option>UPI</option><option>Card</option><option>Cash</option><option>Wallet</option><option>Package session</option><option value="FOC">FOC (free of charge)</option><option>Pending</option></select></div></div>
   <div id="i_split_wrap" data-total="0" style="display:none">
    <div id="i_split_rows"></div>
    <button type="button" class="btn sm sec" onclick="splitPayAddRow('i')">+ Add payment mode</button>
    <div id="i_split_summary" class="muted" style="font-size:12.5px;margin-top:6px"></div>
   </div>
-  <div class="muted" style="font-size:12.5px"><b>Wallet</b> deducts advance balance; <b>Package session</b> uses a prepaid session (no charge).</div>
+  <div class="muted" style="font-size:12.5px"><b>Wallet</b> deducts advance balance; <b>Package session</b> uses a prepaid session (no charge); <b>FOC</b> makes the whole bill free of charge (₹0).</div>
  </div>
  <div class="modal-f"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveInv()">Generate</button></div>`);
  invAddLine();}
@@ -3556,7 +3566,9 @@ function invCalc(){
  const discVal=+((document.getElementById("i_disc_val")||{}).value)||0;
  const discAmt=discAmtFromInputs(sub,discType,discVal);
  const box=document.getElementById("i_tot_breakdown");
- if(discAmt>0){box.innerHTML=`Subtotal: ${inr(sub)}<br>Discount: −${inr(discAmt)}<br>Total: <b id="i_tot">${inr(sub-discAmt)}</b>`;}
+ const isFoc=!((document.getElementById("i_split")||{}).checked)&&((document.getElementById("i_mode")||{}).value==="FOC"); // FOC: every line is billed at ₹0
+ if(isFoc){box.innerHTML=`Total: <b id="i_tot">₹0</b> <span class="tag blue">FOC — free of charge</span>`;}
+ else if(discAmt>0){box.innerHTML=`Subtotal: ${inr(sub)}<br>Discount: −${inr(discAmt)}<br>Total: <b id="i_tot">${inr(sub-discAmt)}</b>`;}
  else{box.innerHTML=`Total: <b id="i_tot">${inr(sub)}</b>`;}
  const splitWrap=document.getElementById("i_split_wrap");
  if(splitWrap){splitWrap.dataset.total=discAmt>0?(sub-discAmt):sub;splitPayCalc("i");}}
@@ -3583,12 +3595,13 @@ function saveInv(){
   inv.splitPayments=parts.map(r=>({mode:r.mode==="Corporate / Insurance"?"Corporate":r.mode,amount:r.amount}));
   inv.status="Paid";inv.mode=inv.splitPayments.map(r=>r.mode+" "+inr(r.amount)).join(" + ");inv.paidAt=todayISO;
  }
+ else if(mode==="FOC"){inv.items=items.map(i=>({...i,d:i.d+" (FOC)",rate:0}));inv.total=0;delete inv.discount;inv.status="Paid";inv.mode="FOC";} // free of charge: every line at ₹0, nothing to collect (no "Paid on" date: nothing was paid)
  else if(mode==="Package session"){const pk=DB.patientPkgs.find(k=>k.pid===pid&&(k.status==="Active"||k.status==="Expired")&&k.used<k.total);if(!pk){alert("No package with sessions left for this patient.");return;}pk.used++;inv.items=items.map(i=>({...i,d:i.d+" (package)",rate:0}));inv.total=0;inv.status="Paid";inv.mode="Package";inv.paidAt=todayISO;}
  else if(mode==="Wallet"){if((p.wallet||0)<gross){alert("Insufficient wallet balance ("+inr(p.wallet||0)+"). Top up first.");return;}p.wallet-=gross;inv.status="Paid";inv.mode="Wallet";inv.paidAt=todayISO;}
  else if(mode==="Pending"){inv.status="Pending";inv.mode="—";}
  else{inv.status="Paid";inv.mode=mode;inv.paidAt=todayISO;}
  DB.invoices.push(inv);
- logAudit("Invoice created",inr(inv.total||gross)+" via "+inv.mode+" ("+inv.id+")",p.name);
+ logAudit("Invoice created",(inv.mode==="FOC"?"FOC — free of charge (₹0)":inr(inv.total||gross)+" via "+inv.mode)+" ("+inv.id+")",p.name);
  save();closeModal();render();}
 
 /* EXPENSES */
@@ -3758,7 +3771,7 @@ views.reports=()=>{
   <div class="panel" style="margin:0">
     <div class="panel-h"><h3>Income by mode</h3></div>
     <div class="panel-b">
-      ${Object.keys(byMode).length?Object.entries(byMode).sort((a,b)=>b[1]-a[1]).map(([m,v])=>`<div class="list-row"><div style="display:flex;justify-content:space-between"><b>${m==='Package'&&v===0?'Package (sessions used, already paid)':m}</b><span>${inr(v)}</span></div><div style="background:var(--line);border-radius:4px;height:6px;margin-top:4px"><div style="width:${Math.round(v/rev*100)}%;background:var(--brand);height:6px;border-radius:4px"></div></div></div>`).join(''):'<p class="muted" style="padding:12px">No paid invoices this month</p>'}
+      ${Object.keys(byMode).length?Object.entries(byMode).sort((a,b)=>b[1]-a[1]).map(([m,v])=>`<div class="list-row"><div style="display:flex;justify-content:space-between"><b>${m==='Package'&&v===0?'Package (sessions used, already paid)':(m==='FOC'?'FOC (free of charge)':m)}</b><span>${inr(v)}</span></div><div style="background:var(--line);border-radius:4px;height:6px;margin-top:4px"><div style="width:${Math.round(v/rev*100)}%;background:var(--brand);height:6px;border-radius:4px"></div></div></div>`).join(''):'<p class="muted" style="padding:12px">No paid invoices this month</p>'}
       ${pend.length?`<div class="list-row" style="opacity:.6"><div style="display:flex;justify-content:space-between"><span class="muted">Pending</span><span>${inr(pend.reduce((s,i)=>s+invDue(i),0))}</span></div></div>`:''}
     </div>
   </div>
@@ -5446,7 +5459,8 @@ views.help=function(){
     <li>Fill in modalities/treatments given, exercises done, today's pain score (0–10), and a quick note</li>
     <li><b>Save session</b> — this only records the clinical details. It does <i>not</i> charge anything yet, and the session shows as unpaid</li>
     <li>To bill it, find that same session and tap <b>💳 End &amp; Pay</b> — set the fee, optionally add a consultation fee or discount, and choose how it's paid</li>
-    <li>Payment options: a single mode (UPI/Cash/Card/Wallet/Package/Corporate/Bill later/No charge), a <b>partial</b> amount now with the rest as balance due, or tick <b>Split payment</b> to divide the bill across more than one mode at once (e.g. ₹500 cash + ₹300 UPI) — the amounts must add up exactly to the bill</li>
+    <li><b>FOC (free of charge):</b> pick <b>FOC</b> as the payment mode on a new invoice, a consultation invoice or a session bill — the service is billed at ₹0, shows an <b>FOC</b> tag, still gets its Bill No. and Invoice ID, and appears on the patient's statement as FOC. It never counts as money due.</li>
+    <li>Payment options: a single mode (UPI/Cash/Card/Wallet/Package/Corporate/Bill later/FOC), a <b>partial</b> amount now with the rest as balance due, or tick <b>Split payment</b> to divide the bill across more than one mode at once (e.g. ₹500 cash + ₹300 UPI) — the amounts must add up exactly to the bill</li>
    </ol>
    <p class="muted" style="margin-top:8px;font-size:12.5px">Logging and billing are deliberately two separate steps so the same session can never accidentally get billed twice.</p>`,has("treatment")),
 
